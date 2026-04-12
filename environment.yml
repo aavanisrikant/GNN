@@ -1,0 +1,17 @@
+name: gnn-env
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pip:
+      - torch-geometric
+      - osmnx
+      - geopandas
+      - streamlit
+      - plotly
+      - earthengine-api
