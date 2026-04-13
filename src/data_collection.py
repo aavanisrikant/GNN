@@ -27,6 +27,13 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
     # Extract year + month from filename
     fname = Path(filepath).stem
     parts = fname.split("_")
+    station = " ".join(parts[4:7])
+
+    month_map = {
+        "January": 1, "February": 2, "March": 3, "April": 4,
+        "May": 5, "June": 6, "July": 7, "August": 8,
+        "September": 9, "October": 10, "November": 11, "December": 12
+    }
 
     month_map = {
         "January": 1, "February": 2, "March": 3, "April": 4,
