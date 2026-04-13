@@ -142,6 +142,8 @@ def load_all_cpcb_files(data_folder: str) -> pd.DataFrame:
 
 # testing
 if __name__ == "__main__":
+    print(" Running CPCB data loader...\n")
+
     df = load_all_cpcb_files("data/raw/CPCB")
 
     print("\n=== DATA PREVIEW ===")
