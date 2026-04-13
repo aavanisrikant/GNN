@@ -142,16 +142,17 @@ def load_all_cpcb_files(data_folder: str) -> pd.DataFrame:
 
 # testing
 if __name__ == "__main__":
-    df = parse_cpcb_file(
-        filepath="data/raw/cpcb/AQI_hourly_2019_April_Bandra_Mumbai_MPCB.xlsx",
-        station="Bandra MPCB",
-        parameter="aqi"
-    )
+    df = load_all_cpcb_files("data/raw/CPCB")
 
-    print(df.head(10))
-    print("\nShape:", df.shape)
-    print("Timestamp range:", df["timestamp"].min(), "to", df["timestamp"].max())
-    print("Missing values:", df["value"].isna().sum(), "/", len(df))
+    print("\n=== DATA PREVIEW ===")
+    print(df.head())
 
-    print("\nMissing data sample:")
-    print(df[df["value"].isna()].head())
+    print("\n=== BASIC INFO ===")
+    print("Shape:", df.shape)
+    print("Stations:", df["station"].unique())
+
+    print("\n=== TIME RANGE ===")
+    print(df["timestamp"].min(), "→", df["timestamp"].max())
+
+    print("\n=== MISSING VALUES ===")
+    print(df["value"].isna().sum(), "/", len(df))
