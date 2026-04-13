@@ -1,105 +1,157 @@
 import pandas as pd
-import os
 import logging
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def load_all_stations(data_folder: str) -> pd.DataFrame:
+def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame:
     """
-    Load all CPCB/SAFAR station CSVs from a folder into a single DataFrame.
-    
-    Args:
-        data_folder: Path to folder containing one CSV per station.
-    
-    Returns:
-        Combined DataFrame with columns: timestamp, station,
-        pm25, pm10, no2, aqi (and others if present).
+    Parse one CPCB Excel file (wide format: rows=days, cols=hours).
+    Returns long-format DataFrame.
     """
-    dfs = []
 
-    csv_files = sorted([
-        f for f in os.listdir(data_folder)
-        if f.endswith(".csv") and not f.startswith(".")
-    ])
+    df = pd.read_excel(
+        filepath,
+        header=0,
+        na_values=["NA", "N/A", "none", "None", "--", ""],
+    )
 
-    if not csv_files:
-        raise FileNotFoundError(f"No CSV files found in {data_folder}")
+    # Standardise column names
+    df.columns = df.columns.str.strip()
 
-    for file in csv_files:
-        filepath = os.path.join(data_folder, file)
+    # First column = day
+    df = df.rename(columns={df.columns[0]: "day"})
 
+    # Extract year + month from filename
+    fname = Path(filepath).stem
+    parts = fname.split("_")
+
+    month_map = {
+        "January": 1, "February": 2, "March": 3, "April": 4,
+        "May": 5, "June": 6, "July": 7, "August": 8,
+        "September": 9, "October": 10, "November": 11, "December": 12
+    }
+
+    year = None
+    month_str = None
+
+    for part in parts:
+        if part.isdigit() and len(part) == 4:
+            year = int(part)
+        if part in month_map:
+            month_str = part
+
+    if year is None or month_str is None:
+        raise ValueError(f"Could not extract year/month from filename: {fname}")
+
+    month = month_map[month_str]
+
+    hour_cols = [c for c in df.columns if c != "day"]
+
+    df_long = df.melt(
+        id_vars=["day"],
+        value_vars=hour_cols,
+        var_name="hour_str",
+        value_name="value"
+    )
+
+    df_long["hour"] = pd.to_numeric(
+        df_long["hour_str"].astype(str).str.extract(r"(\d+)")[0],
+        errors="coerce"
+    )
+
+    df_long = df_long[pd.to_numeric(df_long["day"], errors="coerce").notna()]
+    df_long["day"] = df_long["day"].astype(int)
+
+    # timestamps
+    df_long["timestamp"] = pd.to_datetime(
+        dict(year=year, month=month, day=df_long["day"], hour=df_long["hour"]),
+        errors="coerce"
+    )
+
+    # IST timezone
+    df_long["timestamp"] = df_long["timestamp"].dt.tz_localize(
+        "Asia/Kolkata", nonexistent="shift_forward", ambiguous="NaT"
+    )
+
+    df_long = df_long.dropna(subset=["timestamp"])
+
+    df_long["station"] = station
+    df_long["parameter"] = parameter.lower()
+
+    result = df_long[["timestamp", "station", "parameter", "value"]].copy()
+    result = result.sort_values("timestamp").reset_index(drop=True)
+
+    logger.info(
+        f"Parsed {Path(filepath).name}: "
+        f"{len(result)} rows, "
+        f"{result['value'].notna().sum()} non-null values"
+    )
+
+    return result
+
+
+def load_all_cpcb_files(data_folder: str) -> pd.DataFrame:
+    """
+    Load all CPCB Excel files into one long-format DataFrame.
+    """
+
+    folder = Path(data_folder)
+    files = sorted(folder.glob("*.xlsx"))
+
+    if not files:
+        raise FileNotFoundError(f"No .xlsx files found in {data_folder}")
+
+    all_dfs = []
+
+    for filepath in files:
         try:
-            df = pd.read_csv(
-                filepath,
-                encoding="utf-8",
-                skipinitialspace=True,
-                na_values=["NA", "N/A", "none", "None", "--", ""],
+            fname = filepath.stem
+            parts = fname.split("_")
+
+            parameter = parts[0].lower()
+            station = fname.replace("AQI_hourly_", "")
+            station = station.replace("_", " ")
+
+            df = parse_cpcb_file(
+                str(filepath),
+                station=station,
+                parameter=parameter
             )
 
-            # standardised column names
-            df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
-            timestamp_col = next(
-                (c for c in df.columns if "date" in c or "time" in c),
-                None
-            )
-
-            if timestamp_col:
-                df["timestamp"] = pd.to_datetime(
-                    df[timestamp_col],
-                    dayfirst=True,
-                    errors="coerce"
-                )
-
-                # setting timezone to IST
-                if df["timestamp"].dt.tz is None:
-                    df["timestamp"] = df["timestamp"].dt.tz_localize(
-                        "Asia/Kolkata",
-                        nonexistent="shift_forward",
-                        ambiguous="NaT"
-                    )
-                else:
-                    df["timestamp"] = df["timestamp"].dt.tz_convert("Asia/Kolkata")
-
-                df.drop(columns=[timestamp_col], inplace=True)
-
-            else:
-                logger.warning(f"No timestamp column found in {file}")
-
-            # station names
-            station_name = os.path.splitext(file)[0].replace("_", " ").title()
-            df["station"] = station_name
-
-            dfs.append(df)
-            logger.info(f"Loaded {file}: {len(df)} rows")
+            all_dfs.append(df)
 
         except Exception as e:
-            logger.error(f"Failed to load {file}: {e}")
+            logger.error(f"Failed: {filepath.name} — {e}")
             continue
 
-    if not dfs:
-        raise ValueError("No CSVs loaded successfully — check your data folder")
+    if not all_dfs:
+        raise ValueError("No files loaded successfully")
 
-    combined = pd.concat(dfs, ignore_index=True)
-    logger.info(f"Total rows loaded: {len(combined)} from {len(dfs)} stations")
+    combined = pd.concat(all_dfs, ignore_index=True)
+
+    logger.info(
+        f"Total: {len(combined)} rows from {len(all_dfs)} files, "
+        f"{combined['station'].nunique()} stations"
+    )
 
     return combined
 
 
-# cleaning data
-def clean_aqi_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Standardise and clean the combined station DataFrame.
-    """
+# testing
+if __name__ == "__main__":
+    df = parse_cpcb_file(
+        filepath="data/raw/cpcb/AQI_hourly_2019_April_Bandra_Mumbai_MPCB.xlsx",
+        station="Bandra MPCB",
+        parameter="aqi"
+    )
 
-    # Sorting
-    df = df.sort_values(["station", "timestamp"]).reset_index(drop=True)
-  
-    df = df.dropna(subset=["timestamp"])
+    print(df.head(10))
+    print("\nShape:", df.shape)
+    print("Timestamp range:", df["timestamp"].min(), "to", df["timestamp"].max())
+    print("Missing values:", df["value"].isna().sum(), "/", len(df))
 
-    df = df.drop_duplicates(subset=["station", "timestamp"], keep="first")
-
-    df = df.set_index(["station", "timestamp"])
-
-    return df
+    print("\nMissing data sample:")
+    print(df[df["value"].isna()].head())
