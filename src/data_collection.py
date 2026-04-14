@@ -5,11 +5,8 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-#parse single code
+# parsing single files
 def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame:
-    """
-    Parse one CPCB Excel file (wide → long format)
-    """
 
     df = pd.read_excel(
         filepath,
@@ -17,7 +14,6 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
         na_values=["NA", "N/A", "none", "None", "--", ""],
     )
 
-    #column names
     df.columns = df.columns.str.strip()
     df = df.rename(columns={df.columns[0]: "day"})
 
@@ -40,7 +36,7 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
             month_str = part
 
     if year is None or month_str is None:
-        raise ValueError(f"Could not extract year/month from filename: {fname}")
+        raise ValueError(f"Could not extract year/month from {fname}")
 
     month = month_map[month_str]
 
@@ -66,7 +62,6 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
         errors="coerce"
     )
 
-    # Convert to IST timezone
     df_long["timestamp"] = df_long["timestamp"].dt.tz_localize(
         "Asia/Kolkata", nonexistent="shift_forward", ambiguous="NaT"
     )
@@ -79,66 +74,35 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
     result = df_long[["timestamp", "station", "parameter", "value"]].copy()
     result = result.sort_values("timestamp").reset_index(drop=True)
 
-    logger.info(
-        f"Parsed {Path(filepath).name}: "
-        f"{len(result)} rows, "
-        f"{result['value'].notna().sum()} non-null values"
-    )
-
     return result
+#all files
+def load_all_cpcb_files(folder_path: str):
 
-
-# all files
-def load_all_cpcb_files(data_folder: str) -> pd.DataFrame:
-    """
-    Load all CPCB Excel files into one DataFrame
-    """
-
-    folder = Path(data_folder)
+    folder = Path(folder_path)
     files = sorted(folder.glob("*.xlsx"))
-
-    if not files:
-        raise FileNotFoundError(f"No .xlsx files found in {data_folder}")
 
     all_dfs = []
 
     for filepath in files:
         try:
-            fname = filepath.stem
-            parts = fname.split("_")
+            parts = filepath.stem.split("_")
 
             parameter = parts[0].lower()
-
             station = " ".join(parts[4:-2])
 
-            df = parse_cpcb_file(
-                str(filepath),
-                station=station,
-                parameter=parameter
-            )
+            df = parse_cpcb_file(str(filepath), station, parameter)
 
-            if df.empty:
-                continue
-
-            all_dfs.append(df)
+            if not df.empty:
+                all_dfs.append(df)
 
         except Exception as e:
-            logger.error(f"Failed: {filepath.name} — {e}")
-            continue
-
-    if not all_dfs:
-        raise ValueError("No files loaded successfully")
+            logger.error(f"{filepath.name} failed: {e}")
 
     combined = pd.concat(all_dfs, ignore_index=True)
-
-    logger.info(
-        f"Total: {len(combined)} rows from {len(all_dfs)} files, "
-        f"{combined['station'].nunique()} stations"
-    )
-
     return combined
 
-def pivot_to_wide(df: pd.DataFrame) -> pd.DataFrame:
+def pivot_to_wide(df):
+
     df_wide = df.pivot_table(
         index=["timestamp", "station"],
         columns="parameter",
@@ -148,59 +112,81 @@ def pivot_to_wide(df: pd.DataFrame) -> pd.DataFrame:
     df_wide.columns.name = None
     return df_wide
 
-# missing values
-def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
+def handle_missing_values(df):
 
     df = df.sort_values(["station", "timestamp"])
 
-    def process_station(group):
+    def process(group):
         group = group.set_index("timestamp")
-
         group = group.ffill(limit=3)
-
         group = group.interpolate(limit=12)
-
         return group.reset_index()
 
-    df = df.groupby("station", group_keys=False).apply(process_station).reset_index(drop=True)
-
+    df = df.groupby("station", group_keys=False).apply(process)
     return df
 
-# testing
+def train_test_split_time(df, split_ratio=0.8):
+
+    df = df.sort_values("timestamp")
+
+    split_index = int(len(df) * split_ratio)
+
+    train = df.iloc[:split_index]
+    test = df.iloc[split_index:]
+
+    return train, test
+
+
+def normalize_train_test(train, test):
+
+    features = [c for c in train.columns if c not in ["timestamp", "station"]]
+
+    min_vals = train[features].min()
+    max_vals = train[features].max()
+
+    train[features] = (train[features] - min_vals) / (max_vals - min_vals)
+    test[features] = (test[features] - min_vals) / (max_vals - min_vals)
+
+    return train, test
+
+
+def create_sequences(df, window=24, horizon=1):
+
+    sequences = []
+
+    for station in df["station"].unique():
+        station_df = df[df["station"] == station].sort_values("timestamp")
+
+        values = station_df.drop(columns=["timestamp", "station"]).values
+
+        for i in range(len(values) - window - horizon):
+            X = values[i:i+window]
+            y = values[i+window+horizon-1]
+
+            sequences.append((X, y))
+
+    return sequences
+
 if __name__ == "__main__":
 
-    print("Running CPCB data loader...\n")
+    print("Running pipeline...\n")
 
     df = load_all_cpcb_files("data/raw/CPCB")
 
-    print("\n=== LONG DATA PREVIEW ===")
-    print(df.head())
-
-    print("\n=== BASIC INFO ===")
-    print("Shape:", df.shape)
-    print("Stations:", df["station"].unique())
-
-    print("\n=== TIME RANGE ===")
-    print(df["timestamp"].min(), "→", df["timestamp"].max())
-
-    print("\n=== MISSING VALUES ===")
-    print(df["value"].isna().sum(), "/", len(df))
-
     df_wide = pivot_to_wide(df)
-
-    print("\n=== WIDE DATA PREVIEW ===")
-    print(df_wide.head())
-
-    print("\n=== WIDE SHAPE ===")
-    print(df_wide.shape)
-
-    print("\n=== COLUMNS ===")
-    print(df_wide.columns)
 
     df_clean = handle_missing_values(df_wide)
 
-    print("\n=== AFTER CLEANING ===")
-    print(df_clean.head())
+    train, test = train_test_split_time(df_clean)
 
-    print("\nMissing values AFTER cleaning:")
-    print(df_clean.isna().sum())
+    train, test = normalize_train_test(train, test)
+
+    seq_1 = create_sequences(train, horizon=1)
+    seq_3 = create_sequences(train, horizon=3)
+    seq_6 = create_sequences(train, horizon=6)
+
+    print("Sequences (1 step):", len(seq_1))
+    print("Sequences (3 step):", len(seq_3))
+    print("Sequences (6 step):", len(seq_6))
+
+    print("Input shape:", seq_1[0][0].shape)
