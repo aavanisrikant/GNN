@@ -5,10 +5,10 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# parse single file
+#parse single code
 def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame:
     """
-    Parse one CPCB Excel file (wide → long format).
+    Parse one CPCB Excel file (wide → long format)
     """
 
     df = pd.read_excel(
@@ -17,7 +17,7 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
         na_values=["NA", "N/A", "none", "None", "--", ""],
     )
 
-    # Column names
+    #column names
     df.columns = df.columns.str.strip()
     df = df.rename(columns={df.columns[0]: "day"})
 
@@ -66,14 +66,13 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
         errors="coerce"
     )
 
-    # IST timezone
+    # Convert to IST timezone
     df_long["timestamp"] = df_long["timestamp"].dt.tz_localize(
-        "Asia/Kolkata",
-        nonexistent="shift_forward",
-        ambiguous="NaT"
+        "Asia/Kolkata", nonexistent="shift_forward", ambiguous="NaT"
     )
 
     df_long = df_long.dropna(subset=["timestamp"])
+
     df_long["station"] = station
     df_long["parameter"] = parameter.lower()
 
@@ -88,10 +87,11 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
 
     return result
 
+
 # all files
 def load_all_cpcb_files(data_folder: str) -> pd.DataFrame:
     """
-    Load all CPCB Excel files into one DataFrame.
+    Load all CPCB Excel files into one DataFrame
     """
 
     folder = Path(data_folder)
@@ -108,6 +108,7 @@ def load_all_cpcb_files(data_folder: str) -> pd.DataFrame:
             parts = fname.split("_")
 
             parameter = parts[0].lower()
+
             station = " ".join(parts[4:-2])
 
             df = parse_cpcb_file(
@@ -138,10 +139,6 @@ def load_all_cpcb_files(data_folder: str) -> pd.DataFrame:
     return combined
 
 def pivot_to_wide(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert long format → wide format
-    """
-
     df_wide = df.pivot_table(
         index=["timestamp", "station"],
         columns="parameter",
@@ -149,12 +146,30 @@ def pivot_to_wide(df: pd.DataFrame) -> pd.DataFrame:
     ).reset_index()
 
     df_wide.columns.name = None
-
     return df_wide
+
+# missing values
+def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
+
+    df = df.sort_values(["station", "timestamp"])
+
+    def process_station(group):
+        group = group.set_index("timestamp")
+
+        group = group.ffill(limit=3)
+
+        group = group.interpolate(limit=12)
+
+        return group.reset_index()
+
+    df = df.groupby("station", group_keys=False).apply(process_station).reset_index(drop=True)
+
+    return df
 
 # testing
 if __name__ == "__main__":
-    print("🚀 Running CPCB data loader...\n")
+
+    print("Running CPCB data loader...\n")
 
     df = load_all_cpcb_files("data/raw/CPCB")
 
@@ -170,6 +185,7 @@ if __name__ == "__main__":
 
     print("\n=== MISSING VALUES ===")
     print(df["value"].isna().sum(), "/", len(df))
+
     df_wide = pivot_to_wide(df)
 
     print("\n=== WIDE DATA PREVIEW ===")
@@ -180,3 +196,11 @@ if __name__ == "__main__":
 
     print("\n=== COLUMNS ===")
     print(df_wide.columns)
+
+    df_clean = handle_missing_values(df_wide)
+
+    print("\n=== AFTER CLEANING ===")
+    print(df_clean.head())
+
+    print("\nMissing values AFTER cleaning:")
+    print(df_clean.isna().sum())
