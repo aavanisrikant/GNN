@@ -5,11 +5,10 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
+# parse single file
 def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame:
     """
-    Parse one CPCB Excel file (wide format: rows=days, cols=hours).
-    Returns long-format DataFrame.
+    Parse one CPCB Excel file (wide → long format).
     """
 
     df = pd.read_excel(
@@ -18,22 +17,12 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
         na_values=["NA", "N/A", "none", "None", "--", ""],
     )
 
-    # Standardise column names
+    # Column names
     df.columns = df.columns.str.strip()
-
-    # First column = day
     df = df.rename(columns={df.columns[0]: "day"})
 
-    # Extract year + month from filename
     fname = Path(filepath).stem
     parts = fname.split("_")
-    station = " ".join(parts[4:-2])
-
-    month_map = {
-        "January": 1, "February": 2, "March": 3, "April": 4,
-        "May": 5, "June": 6, "July": 7, "August": 8,
-        "September": 9, "October": 10, "November": 11, "December": 12
-    }
 
     month_map = {
         "January": 1, "February": 2, "March": 3, "April": 4,
@@ -72,7 +61,6 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
     df_long = df_long[pd.to_numeric(df_long["day"], errors="coerce").notna()]
     df_long["day"] = df_long["day"].astype(int)
 
-    # timestamps
     df_long["timestamp"] = pd.to_datetime(
         dict(year=year, month=month, day=df_long["day"], hour=df_long["hour"]),
         errors="coerce"
@@ -80,11 +68,12 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
 
     # IST timezone
     df_long["timestamp"] = df_long["timestamp"].dt.tz_localize(
-        "Asia/Kolkata", nonexistent="shift_forward", ambiguous="NaT"
+        "Asia/Kolkata",
+        nonexistent="shift_forward",
+        ambiguous="NaT"
     )
 
     df_long = df_long.dropna(subset=["timestamp"])
-
     df_long["station"] = station
     df_long["parameter"] = parameter.lower()
 
@@ -99,10 +88,10 @@ def parse_cpcb_file(filepath: str, station: str, parameter: str) -> pd.DataFrame
 
     return result
 
-
+# all files
 def load_all_cpcb_files(data_folder: str) -> pd.DataFrame:
     """
-    Load all CPCB Excel files into one long-format DataFrame.
+    Load all CPCB Excel files into one DataFrame.
     """
 
     folder = Path(data_folder)
@@ -119,14 +108,16 @@ def load_all_cpcb_files(data_folder: str) -> pd.DataFrame:
             parts = fname.split("_")
 
             parameter = parts[0].lower()
-            station = fname.replace("AQI_hourly_", "")
-            station = station.replace("_", " ")
+            station = " ".join(parts[4:-2])
 
             df = parse_cpcb_file(
                 str(filepath),
                 station=station,
                 parameter=parameter
             )
+
+            if df.empty:
+                continue
 
             all_dfs.append(df)
 
@@ -146,14 +137,28 @@ def load_all_cpcb_files(data_folder: str) -> pd.DataFrame:
 
     return combined
 
+def pivot_to_wide(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert long format → wide format
+    """
+
+    df_wide = df.pivot_table(
+        index=["timestamp", "station"],
+        columns="parameter",
+        values="value"
+    ).reset_index()
+
+    df_wide.columns.name = None
+
+    return df_wide
 
 # testing
 if __name__ == "__main__":
-    print(" Running CPCB data loader...\n")
+    print("🚀 Running CPCB data loader...\n")
 
     df = load_all_cpcb_files("data/raw/CPCB")
 
-    print("\n=== DATA PREVIEW ===")
+    print("\n=== LONG DATA PREVIEW ===")
     print(df.head())
 
     print("\n=== BASIC INFO ===")
@@ -165,3 +170,13 @@ if __name__ == "__main__":
 
     print("\n=== MISSING VALUES ===")
     print(df["value"].isna().sum(), "/", len(df))
+    df_wide = pivot_to_wide(df)
+
+    print("\n=== WIDE DATA PREVIEW ===")
+    print(df_wide.head())
+
+    print("\n=== WIDE SHAPE ===")
+    print(df_wide.shape)
+
+    print("\n=== COLUMNS ===")
+    print(df_wide.columns)
