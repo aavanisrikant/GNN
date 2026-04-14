@@ -118,6 +118,7 @@ def handle_missing_values(df):
 
     def process(group):
         group = group.set_index("timestamp")
+        group = group.apply(pd.to_numeric, errors="ignore")
         group = group.ffill(limit=3)
         group = group.interpolate(limit=12)
         return group.reset_index()
