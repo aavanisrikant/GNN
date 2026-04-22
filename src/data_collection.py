@@ -181,6 +181,11 @@ if __name__ == "__main__":
     df_wide = pivot_to_wide(df)
 
     df_clean = handle_missing_values(df_wide)
+   
+    Path("data/processed").mkdir(parents=True, exist_ok=True)
+    df_clean.to_csv("data/processed/clean_cpcb.csv", index=False)
+
+    print("Saved clean data\n")
 
     train, test = train_test_split_time(df_clean)
 
