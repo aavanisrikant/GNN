@@ -84,7 +84,7 @@ for name in stations:
         lat, lon = ox.geocode(query)
         results[name] = (lat, lon)
 
-        time.sleep(1)  
+        time.sleep(1)
 
     except Exception:
         print(f"Failed: {name}")
@@ -92,18 +92,22 @@ for name in stations:
 
 df_new = pd.DataFrame.from_dict(results, orient="index", columns=["lat", "lon"])
 df_new.index.name = "station"
-df_new.reset_index(inplace=True)
+df_new = df_new.reset_index()
 
 if os.path.exists(cache_path):
+    df_existing = pd.read_csv(cache_path)
     df_final = pd.concat([df_existing, df_new], ignore_index=True)
 else:
     df_final = df_new.copy()
 
-
+df_final = df_final.sort_values(by=["station", "lat"], na_position="first")
 df_final = df_final.drop_duplicates(subset="station", keep="last")
+df_final = df_final.reset_index(drop=True)
+
 df_final.to_csv(cache_path, index=False)
 
 print("\n Saved station_coords.csv")
+
 print("\n--- VALIDATION ---")
 print("Total rows:", len(df_final))
 print("Unique stations:", df_final["station"].nunique())
