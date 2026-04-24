@@ -100,10 +100,20 @@ if os.path.exists(cache_path):
 else:
     df_final = df_new.copy()
 
-df_final = df_final.sort_values(by=["station", "lat"], na_position="first")
-df_final = df_final.drop_duplicates(subset="station", keep="last")
-df_final = df_final.reset_index(drop=True)
+df_final["station"] = (
+    df_final["station"]
+    .astype(str)
+    .str.strip()
+    .str.replace("–", "-", regex=False)
+    .str.replace("_", " ", regex=False)
+    .str.replace(r"\s+", " ", regex=True)
+)
 
+df_final = df_final.sort_values(by=["station", "lat"], na_position="first")
+
+df_final = df_final.drop_duplicates(subset="station", keep="last")
+
+df_final = df_final.reset_index(drop=True)
 df_final.to_csv(cache_path, index=False)
 
 print("\n Saved station_coords.csv")
