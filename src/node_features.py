@@ -1,136 +1,125 @@
 import pandas as pd
 import numpy as np
-import json
-from pathlib import Path
+import os
 
-DATA_PATH     = "data/processed/clean_data.csv"
-NODE_MAP_PATH = "data/processed/node_mapping.json"
-OUTPUT_DIR    = Path("data/processed")
+DATA_PATH = "data/processed/clean_cpcb.csv"
+SAVE_DIR = "data/processed"
 
-WINDOW        = 24
-HORIZONS      = [1, 3, 6]
+LOOKBACK = 24
+HORIZONS = [1, 3, 6]
 
-TRAIN_RATIO   = 0.70
-VAL_RATIO     = 0.15
+TRAIN_RATIO = 0.7
+VAL_RATIO = 0.15
 
-MAX_NAN_FRAC  = 0.8   
-
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+os.makedirs(SAVE_DIR, exist_ok=True)
 
 print("Loading data...")
 
 df = pd.read_csv(DATA_PATH)
 
 df["timestamp"] = pd.to_datetime(df["timestamp"])
+df = df.sort_values(["timestamp", "station"])
 
-with open(NODE_MAP_PATH, "r") as f:
-    node_mapping = json.load(f)
-
-stations_order = list(node_mapping.keys())
 
 print("Pivoting data...")
 
 df_pivot = df.pivot(index="timestamp", columns="station", values="aqi")
 
-df_pivot = df_pivot.reindex(columns=stations_order)
-df_pivot = df_pivot.sort_index()
+df_pivot = df_pivot.resample("1h").mean()
 
-df_pivot = df_pivot.resample("1H").mean()
-
-print(f"Raw time steps: {len(df_pivot)}")
+print("Raw time steps:", len(df_pivot))
 
 print("Applying robust imputation...")
 
-df_pivot = df_pivot.ffill(limit=6)
-df_pivot = df_pivot.bfill(limit=6)
+df_pivot = df_pivot.ffill(limit=12)
 
-df_pivot = df_pivot.interpolate(method="linear", limit=24)
+df_pivot = df_pivot.bfill(limit=12)
 
-df_pivot = df_pivot.fillna(df_pivot.median())
+df_pivot = df_pivot.interpolate(limit=12)
 
-nan_frac = df_pivot.isna().mean()
+df_pivot = df_pivot.apply(lambda col: col.fillna(col.median()), axis=0)
 
-valid_cols = nan_frac[nan_frac < 0.9].index
-df_pivot = df_pivot[valid_cols]
+df_pivot = df_pivot.fillna(df_pivot.mean())
 
-print(f"\nUsing {len(valid_cols)} stations after filtering")
+print(f"\nTotal stations used: {df_pivot.shape[1]}")
 
-timestamps = df_pivot.index
-data       = df_pivot.values.astype(np.float32)
-hours      = np.array(timestamps.hour)
+data = df_pivot.values  
 
-T = data.shape[0]
+T = len(data)
 
 train_end = int(T * TRAIN_RATIO)
-val_end   = int(T * (TRAIN_RATIO + VAL_RATIO))
+val_end = int(T * (TRAIN_RATIO + VAL_RATIO))
 
-print(f"\nTrain cutoff: {train_end}")
-print(f"Val cutoff:   {val_end}")
+print("\nTrain cutoff:", train_end)
+print("Val cutoff:", val_end)
 
 print("\nNormalizing...")
 
-min_vals = np.min(data[:train_end], axis=0)
-max_vals = np.max(data[:train_end], axis=0)
+train_data = data[:train_end]
 
-data_norm = (data - min_vals) / (max_vals - min_vals + 1e-8)
-data_norm = np.clip(data_norm, 0, 1)
+min_vals = np.min(train_data, axis=0)
+max_vals = np.max(train_data, axis=0)
 
-def create_sequences(data_norm, raw_data, hours, window, horizon):
-    X, y, h_arr, idx_arr = [], [], [], []
-    skipped = 0
+denom = (max_vals - min_vals)
+denom[denom == 0] = 1
 
-    for t in range(window, len(data_norm) - horizon + 1):
-        window_raw = raw_data[t - window:t]
+data_norm = (data - min_vals) / denom
 
-        nan_frac = np.isnan(window_raw).mean()
+np.save(f"{SAVE_DIR}/min_vals.npy", min_vals)
+np.save(f"{SAVE_DIR}/max_vals.npy", max_vals)
 
-        if nan_frac > MAX_NAN_FRAC:
-            skipped += 1
-            continue
+def create_sequences(data, lookback, horizon):
+    X, y, hours, time_idx = [], [], [], []
 
-        X.append(data_norm[t - window:t].T)
-        y.append(data_norm[t + horizon - 1])
-        h_arr.append(hours[t + horizon - 1])
-        idx_arr.append(t)
+    for t in range(lookback, len(data) - horizon):
+        x = data[t - lookback:t]      
+        target = data[t + horizon]  
 
-    return (
-        np.array(X),
-        np.array(y),
-        np.array(h_arr),
-        np.array(idx_arr),
-        skipped
-    )
+        X.append(x)
+        y.append(target)
 
-def split(idx):
-    train = idx < train_end
-    val   = (idx >= train_end) & (idx < val_end)
-    test  = idx >= val_end
-    return train, val, test
+        hours.append(t % 24)
+        time_idx.append(t)
+
+    return np.array(X), np.array(y), np.array(hours), np.array(time_idx)
 
 for h in HORIZONS:
-    print(f"\n── Horizon {h} ──")
+    print(f"\n— Horizon = {h} —")
 
-    X, y, h_arr, idx_arr, skipped = create_sequences(
-        data_norm, data, hours, WINDOW, h
-    )
+    X, y, hours, time_idx = create_sequences(data_norm, LOOKBACK, h)
 
-    print(f"Samples: {len(X)}")
-    print(f"Skipped: {skipped}")
+    print("Samples:", len(X))
 
-    train, val, test = split(idx_arr)
+    # Split
+    train_mask = time_idx < train_end
+    val_mask = (time_idx >= train_end) & (time_idx < val_end)
+    test_mask = time_idx >= val_end
 
-    print(f"Train: {train.sum()} | Val: {val.sum()} | Test: {test.sum()}")
+    X_train, y_train = X[train_mask], y[train_mask]
+    X_val, y_val = X[val_mask], y[val_mask]
+    X_test, y_test = X[test_mask], y[test_mask]
 
-    np.save(OUTPUT_DIR / f"X_h{h}.npy", X)
-    np.save(OUTPUT_DIR / f"y_h{h}.npy", y)
-    np.save(OUTPUT_DIR / f"hours_h{h}.npy", h_arr)
-    np.save(OUTPUT_DIR / f"time_index_h{h}.npy", idx_arr)
+    hours_h = hours
+    time_idx_h = time_idx
 
-    np.save(OUTPUT_DIR / f"train_mask_h{h}.npy", train)
-    np.save(OUTPUT_DIR / f"val_mask_h{h}.npy", val)
-    np.save(OUTPUT_DIR / f"test_mask_h{h}.npy", test)
+    print(f"Train: {len(X_train)} | Val: {len(X_val)} | Test: {len(X_test)}")
 
-np.save(OUTPUT_DIR / "min_vals.npy", min_vals)
-np.save(OUTPUT_DIR / "max_vals.npy", max_vals)
+    np.save(f"{SAVE_DIR}/X_h{h}.npy", X)
+    np.save(f"{SAVE_DIR}/y_h{h}.npy", y)
+    np.save(f"{SAVE_DIR}/hours_h{h}.npy", hours_h)
+    np.save(f"{SAVE_DIR}/time_index_h{h}.npy", time_idx_h)
+
+    np.save(f"{SAVE_DIR}/X_train_h{h}.npy", X_train)
+    np.save(f"{SAVE_DIR}/y_train_h{h}.npy", y_train)
+
+    np.save(f"{SAVE_DIR}/X_val_h{h}.npy", X_val)
+    np.save(f"{SAVE_DIR}/y_val_h{h}.npy", y_val)
+
+    np.save(f"{SAVE_DIR}/X_test_h{h}.npy", X_test)
+    np.save(f"{SAVE_DIR}/y_test_h{h}.npy", y_test)
 
 print("\n--- PHASE 2 COMPLETE ---")
+print("Total timesteps:", T)
+print("Stations:", data.shape[1])
+print("\nSaved files for horizons:", HORIZONS)
+print("Also saved: min_vals.npy, max_vals.npy")
