@@ -78,10 +78,12 @@ for name in stations:
         print(f"Failed: {name}")
         results[name] = (None, None)
 
+# Combine old + new
+df_new = pd.DataFrame.from_dict(results, orient="index", columns=["lat", "lon"])
+df_new.index.name = "station"
 
-df = pd.DataFrame.from_dict(results, orient="index", columns=["lat", "lon"])
-df.index.name = "station"
+df_final = df_existing.combine_first(df_new)
 
-df.to_csv("data/processed/station_coords.csv")
+df_final.to_csv("data/processed/station_coords.csv")
 
 print("\nSaved station_coords.csv")
