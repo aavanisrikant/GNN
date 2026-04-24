@@ -1,7 +1,7 @@
+import os
 import osmnx as ox
 import pandas as pd
 import time
-import os
 
 stations = [
     "Bandra Kurla Complex, Mumbai - IITM",
@@ -36,6 +36,12 @@ stations = [
     "Worli, Mumbai - MPCB",
 ]
 
+manual_coords = {
+    "Chhatrapati Shivaji Intl. Airport (T2), Mumbai - MPCB": (19.0886300, 72.8681400),
+    "Shivaji Nagar, Mumbai - BMC": (19.0667800, 72.9287000),
+    "Vasai West, Mumbai - MPCB": (19.3919000, 72.8397000),
+    "Siddharth Nagar-Worli, Mumbai - IITM": (19.0100000, 72.8150000),
+}
 
 def clean_query(name):
     query = name
@@ -43,47 +49,62 @@ def clean_query(name):
     query = query.replace(" - MPCB", "")
     query = query.replace(" - BMC", "")
     query = query.replace("_", " ")
-    return query
+    query = query.replace("-", " ")
+    query = query.replace("(", "")
+    query = query.replace(")", "")
+    return query + ", Mumbai, India"
 
+cache_path = "data/processed/station_coords.csv"
 
-if os.path.exists("data/processed/station_coords.csv"):
-    df_existing = pd.read_csv("data/processed/station_coords.csv", index_col="station")
+if os.path.exists(cache_path):
+    df_existing = pd.read_csv(cache_path)
+    existing_dict = dict(
+        zip(df_existing["station"], zip(df_existing["lat"], df_existing["lon"]))
+    )
 else:
-    df_existing = pd.DataFrame(columns=["lat", "lon"])
-
+    existing_dict = {}
 
 results = {}
 
 for name in stations:
+    if name in existing_dict and pd.notna(existing_dict[name][0]):
+        print(f"Skipping (cached): {name}")
+        results[name] = existing_dict[name]
+        continue
+
+    if name in manual_coords:
+        print(f"Using manual coords: {name}")
+        results[name] = manual_coords[name]
+        continue
+
     try:
-        if name in df_existing.index and pd.notna(df_existing.loc[name, "lat"]):
-            print(f"Skipping (cached): {name}")
-            results[name] = (
-                df_existing.loc[name, "lat"],
-                df_existing.loc[name, "lon"]
-            )
-            continue
-
         query = clean_query(name)
-        full_query = f"{query}, Mumbai, India"
+        print(f"Fetching: {query}")
 
-        print(f"Fetching: {full_query}")
-
-        lat, lon = ox.geocode(full_query)
+        lat, lon = ox.geocode(query)
         results[name] = (lat, lon)
 
-        time.sleep(1)
+        time.sleep(1)  
 
     except Exception:
         print(f"Failed: {name}")
         results[name] = (None, None)
 
-# Combine old + new
 df_new = pd.DataFrame.from_dict(results, orient="index", columns=["lat", "lon"])
 df_new.index.name = "station"
+df_new.reset_index(inplace=True)
 
-df_final = df_existing.combine_first(df_new)
+if os.path.exists(cache_path):
+    df_final = pd.concat([df_existing, df_new], ignore_index=True)
+else:
+    df_final = df_new.copy()
 
-df_final.to_csv("data/processed/station_coords.csv")
 
-print("\nSaved station_coords.csv")
+df_final = df_final.drop_duplicates(subset="station", keep="last")
+df_final.to_csv(cache_path, index=False)
+
+print("\n Saved station_coords.csv")
+print("\n--- VALIDATION ---")
+print("Total rows:", len(df_final))
+print("Unique stations:", df_final["station"].nunique())
+print("Missing coords:", df_final[["lat", "lon"]].isna().sum().sum())
