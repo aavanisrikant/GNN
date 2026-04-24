@@ -1,6 +1,7 @@
 import osmnx as ox
 import pandas as pd
 import time
+import os
 
 stations = [
     "Bandra Kurla Complex, Mumbai - IITM",
@@ -35,29 +36,40 @@ stations = [
     "Worli, Mumbai - MPCB",
 ]
 
+
 def clean_query(name):
     query = name
     query = query.replace(" - IITM", "")
     query = query.replace(" - MPCB", "")
     query = query.replace(" - BMC", "")
-  
     query = query.replace("_", " ")
-    query = query.replace("-", " ")
-    query = query.replace("(", "")
-    query = query.replace(")", "")
-
     return query
 
-#coordinates
+
+if os.path.exists("data/processed/station_coords.csv"):
+    df_existing = pd.read_csv("data/processed/station_coords.csv", index_col="station")
+else:
+    df_existing = pd.DataFrame(columns=["lat", "lon"])
+
+
 results = {}
 
 for name in stations:
     try:
+        if name in df_existing.index and pd.notna(df_existing.loc[name, "lat"]):
+            print(f"Skipping (cached): {name}")
+            results[name] = (
+                df_existing.loc[name, "lat"],
+                df_existing.loc[name, "lon"]
+            )
+            continue
+
         query = clean_query(name)
+        full_query = f"{query}, Mumbai, India"
 
-        print(f"Fetching: {query}")
+        print(f"Fetching: {full_query}")
 
-        lat, lon = ox.geocode(query)
+        lat, lon = ox.geocode(full_query)
         results[name] = (lat, lon)
 
         time.sleep(1)
@@ -72,4 +84,4 @@ df.index.name = "station"
 
 df.to_csv("data/processed/station_coords.csv")
 
-print("\n Saved station_coords.csv")
+print("\nSaved station_coords.csv")
