@@ -71,8 +71,8 @@ np.save(f"{SAVE_DIR}/max_vals.npy", max_vals)
 def create_sequences(data, lookback, horizon):
     X, y, hours, time_idx = [], [], [], []
 
-    for t in range(lookback, len(data) - horizon):
-        x = data[t - lookback:t]      
+    for t in range(lookback, len(data) - horizon):  
+        x = data[t - lookback:t].T 
         target = data[t + horizon]  
 
         X.append(x)
