@@ -155,7 +155,7 @@ patience_counter = 0
 
 for epoch in range(1, EPOCHS + 1):
     train_loss = train_epoch()
-    val_loss, val_mae, _, _ = evaluate(val_loader)
+    val_loss, val_mae, _, _, _ = evaluate(val_loader)
 
     print(f"Epoch {epoch:03d} | Train: {train_loss:.4f} | Val: {val_loss:.4f} | MAE: {val_mae:.2f}")
 
@@ -174,7 +174,7 @@ training_time = time.time() - start_time
 
 model.load_state_dict(torch.load(f"{SAVE_DIR}/lstm.pt"))
 
-_, test_mae, test_rmse, test_mape, test_r2 = evaluate(test_loader)
+val_loss, val_mae, val_rmse, val_mape, val_r2 = evaluate(val_loader)
 
 print("\nFINAL TEST RESULTS")
 print(f"MAE  : {test_mae:.2f}")
