@@ -28,7 +28,10 @@ y_val   = np.load(f"{DATA_DIR}/y_val_h{HORIZON}.npy")
 X_test  = np.load(f"{DATA_DIR}/X_test_h{HORIZON}.npy")
 y_test  = np.load(f"{DATA_DIR}/y_test_h{HORIZON}.npy")
 
-# 🔥 CRITICAL: APPLY REDUCTION HERE
+min_vals = np.load(f"{DATA_DIR}/min_vals.npy")
+max_vals = np.load(f"{DATA_DIR}/max_vals.npy")
+
+# Data reduction
 X_train = X_train[:5000]
 y_train = y_train[:5000]
 
