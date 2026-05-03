@@ -176,7 +176,11 @@ model.load_state_dict(torch.load(f"{SAVE_DIR}/lstm.pt"))
 
 val_loss, val_mae, val_rmse, val_mape, val_r2 = evaluate(val_loader)
 
+# ── FINAL TEST EVALUATION ─────────────────────────────────────────
 print("\nFINAL TEST RESULTS")
+
+test_loss, test_mae, test_rmse, test_mape, test_r2 = evaluate(test_loader)
+
 print(f"MAE  : {test_mae:.2f}")
 print(f"RMSE : {test_rmse:.2f}")
 print(f"MAPE : {test_mape:.1f}%")
