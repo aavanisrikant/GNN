@@ -20,7 +20,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 Path(SAVE_DIR).mkdir(parents=True, exist_ok=True)
 print(f"Device: {DEVICE}")
-
+# ---------------- LOAD DATA ----------------
 X_train = np.load(f"{DATA_DIR}/X_train_h{HORIZON}.npy")
 y_train = np.load(f"{DATA_DIR}/y_train_h{HORIZON}.npy")
 X_val   = np.load(f"{DATA_DIR}/X_val_h{HORIZON}.npy")
@@ -28,16 +28,15 @@ y_val   = np.load(f"{DATA_DIR}/y_val_h{HORIZON}.npy")
 X_test  = np.load(f"{DATA_DIR}/X_test_h{HORIZON}.npy")
 y_test  = np.load(f"{DATA_DIR}/y_test_h{HORIZON}.npy")
 
-min_vals = np.load(f"{DATA_DIR}/min_vals.npy")
-max_vals = np.load(f"{DATA_DIR}/max_vals.npy")
-X_train = X_train[:MAX_TRAIN_SAMPLES]
-y_train = y_train[:MAX_TRAIN_SAMPLES]
+# 🔥 CRITICAL: APPLY REDUCTION HERE
+X_train = X_train[:5000]
+y_train = y_train[:5000]
 
-X_val = X_val[:MAX_VAL_SAMPLES]
-y_val = y_val[:MAX_VAL_SAMPLES]
+X_val = X_val[:2000]
+y_val = y_val[:2000]
 
-X_test = X_test[:MAX_TEST_SAMPLES]
-y_test = y_test[:MAX_TEST_SAMPLES]
+X_test = X_test[:2000]
+y_test = y_test[:2000]
 
 N = X_train.shape[1]
 T = X_train.shape[2]
