@@ -1,7 +1,7 @@
-# src/error_analysis.py
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from pathlib import Path
 
 DATA_DIR     = "models/baselines"
@@ -19,24 +19,21 @@ station_df = pd.read_csv(STATION_FILE)
 S, N = preds.shape
 print(f"Samples: {S} | Stations: {N}")
 
-time_idx_all  = np.load(f"{PROC_DIR}/time_index_h{HORIZON}.npy")
-test_mask     = np.load(f"{PROC_DIR}/test_mask_h{HORIZON}.npy")
-time_idx_test = time_idx_all[test_mask]
-
 raw_ts = pd.to_datetime(
     pd.read_csv(f"{PROC_DIR}/clean_cpcb.csv", usecols=["timestamp"])["timestamp"]
 ).drop_duplicates().sort_values().reset_index(drop=True)
 
-time_index = raw_ts.iloc[time_idx_test].reset_index(drop=True)
+T_total  = len(raw_ts)
+val_end  = int(T_total * (0.70 + 0.15))   # 85% mark — where test set starts
+
+time_index = raw_ts.iloc[val_end : val_end + S].reset_index(drop=True)
 print(f"Test period: {time_index.iloc[0]} → {time_index.iloc[-1]}")
 
-# error calculation
 errors = np.abs(preds - targets)   # (S, N) — real AQI units
 print(f"Overall MAE: {errors.mean():.2f} AQI units")
-
-# error by station
-station_error          = errors.mean(axis=0)   # (N,)
-station_df["error"]    = station_error
+#error by station
+station_error       = errors.mean(axis=0)   # (N,)
+station_df["error"] = station_error
 
 print("\nTop 5 worst stations:")
 print(station_df.sort_values("error", ascending=False)[
@@ -50,12 +47,12 @@ plt.figure(figsize=(8, 6))
 sc = plt.scatter(
     station_df["lon"],
     station_df["lat"],
-    s = station_df["error"] * 5,
-    c = station_df["error"],
-    cmap      = "RdYlGn_r",
-    alpha     = 0.85,
-    edgecolors= "white",
-    linewidths= 0.7,
+    s          = station_df["error"] * 5,
+    c          = station_df["error"],
+    cmap       = "RdYlGn_r",
+    alpha      = 0.85,
+    edgecolors = "white",
+    linewidths = 0.7,
 )
 plt.colorbar(sc, label="MAE (AQI units)")
 for _, row in station_df.iterrows():
@@ -72,7 +69,7 @@ plt.savefig(f"{PLOT_DIR}/error_by_station.png", dpi=150)
 plt.show()
 print("Saved error_by_station.png")
 
-#error by hour
+# error by hour
 hours = time_index.dt.hour   # (S,)
 
 df_hour    = pd.DataFrame({
@@ -81,15 +78,14 @@ df_hour    = pd.DataFrame({
 })
 hour_error = df_hour.groupby("hour")["error"].mean()
 
-# Colour bars by time of day
 colors = []
 for h in range(24):
     if h in [7, 8, 17, 18]:
-        colors.append("#e05c2a")       # rush hour
+        colors.append("#e05c2a")   # rush hour
     elif h >= 23 or h <= 4:
-        colors.append("#4a7ec4")       # night
+        colors.append("#4a7ec4")   # night
     else:
-        colors.append("#888888")       # normal
+        colors.append("#888888")   # normal
 
 plt.figure(figsize=(11, 4))
 plt.bar(hour_error.index, hour_error.values, color=colors, alpha=0.85, edgecolor="white")
@@ -98,8 +94,6 @@ plt.xlabel("Hour of Day (IST)")
 plt.ylabel("MAE (AQI units)")
 plt.title("LSTM — Error by Hour of Day")
 plt.grid(axis="y", alpha=0.3)
-
-from matplotlib.patches import Patch
 legend = [Patch(color="#e05c2a", label="Rush hour (7–9am, 5–7pm)"),
           Patch(color="#4a7ec4", label="Night (11pm–5am)"),
           Patch(color="#888888", label="Other")]
@@ -108,9 +102,7 @@ plt.tight_layout()
 plt.savefig(f"{PLOT_DIR}/error_by_hour.png", dpi=150)
 plt.show()
 print("Saved error_by_hour.png")
-
-
-# ── 3. ERROR BY MONTH ─────────────────────────────────────────────────────────
+# error by month
 months = time_index.dt.month   # (S,)
 
 df_month    = pd.DataFrame({
@@ -119,8 +111,8 @@ df_month    = pd.DataFrame({
 })
 month_error = df_month.groupby("month")["error"].mean()
 
-month_names = {1:"Jan", 2:"Feb", 3:"Mar", 4:"Apr", 5:"May", 6:"Jun",
-               7:"Jul", 8:"Aug", 9:"Sep", 10:"Oct", 11:"Nov", 12:"Dec"}
+month_names  = {1:"Jan", 2:"Feb", 3:"Mar", 4:"Apr", 5:"May",  6:"Jun",
+                7:"Jul", 8:"Aug", 9:"Sep", 10:"Oct", 11:"Nov", 12:"Dec"}
 month_labels = [month_names[m] for m in month_error.index]
 
 plt.figure(figsize=(10, 4))
@@ -134,13 +126,11 @@ plt.savefig(f"{PLOT_DIR}/error_by_month.png", dpi=150)
 plt.show()
 print("Saved error_by_month.png")
 
-
-# ── 4. PREDICTED vs ACTUAL — WORST AND BEST STATIONS ─────────────────────────
-sorted_idx = np.argsort(station_error)
-best_idx   = sorted_idx[0]
-worst_idxs = sorted_idx[-3:][::-1]
-plot_idxs  = list(worst_idxs) + [best_idx]
-plot_labels= ["Worst 1", "Worst 2", "Worst 3", "Best"]
+sorted_idx  = np.argsort(station_error)
+best_idx    = sorted_idx[0]
+worst_idxs  = sorted_idx[-3:][::-1]
+plot_idxs   = list(worst_idxs) + [best_idx]
+plot_labels = ["Worst 1", "Worst 2", "Worst 3", "Best"]
 
 N_SHOW = min(24 * 30, S)   # last 30 days or all test data if shorter
 
@@ -163,17 +153,16 @@ plt.show()
 print("Saved pred_vs_actual.png")
 
 
-# ── 5. SUMMARY ────────────────────────────────────────────────────────────────
 peak_hour  = int(hour_error.idxmax())
 peak_month = int(month_error.idxmax())
 
 print("\n── ERROR ANALYSIS SUMMARY ───────────────────────────────")
-print(f"  Overall MAE    : {errors.mean():.2f} AQI units")
-print(f"  Worst station  : {station_df.sort_values('error', ascending=False).iloc[0]['station']}")
-print(f"                   MAE = {station_error.max():.2f}")
-print(f"  Best station   : {station_df.sort_values('error').iloc[0]['station']}")
-print(f"                   MAE = {station_error.min():.2f}")
-print(f"  Peak error hour: {peak_hour:02d}:00")
+print(f"  Overall MAE     : {errors.mean():.2f} AQI units")
+print(f"  Worst station   : {station_df.sort_values('error', ascending=False).iloc[0]['station']}")
+print(f"                    MAE = {station_error.max():.2f}")
+print(f"  Best station    : {station_df.sort_values('error').iloc[0]['station']}")
+print(f"                    MAE = {station_error.min():.2f}")
+print(f"  Peak error hour : {peak_hour:02d}:00")
 print(f"  Peak error month: {month_names[peak_month]}")
-print(f"  Plots saved to : {PLOT_DIR}/")
+print(f"  Plots saved to  : {PLOT_DIR}/")
 print("─────────────────────────────────────────────────────────")
