@@ -29,6 +29,10 @@ X_val   = np.load(f"{DATA_DIR}/X_val_h{HORIZON}.npy")
 y_val   = np.load(f"{DATA_DIR}/y_val_h{HORIZON}.npy")
 X_test  = np.load(f"{DATA_DIR}/X_test_h{HORIZON}.npy")
 y_test  = np.load(f"{DATA_DIR}/y_test_h{HORIZON}.npy")
+time_index_test = np.load(
+    f"{DATA_DIR}/time_index_h{HORIZON}.npy",
+    allow_pickle=True
+)
 
 min_vals = np.load(f"{DATA_DIR}/min_vals.npy")
 max_vals = np.load(f"{DATA_DIR}/max_vals.npy")
@@ -180,7 +184,35 @@ val_loss, val_mae, val_rmse, val_mape, val_r2 = evaluate(val_loader)
 print("\nFINAL TEST RESULTS")
 
 test_loss, test_mae, test_rmse, test_mape, test_r2 = evaluate(test_loader)
+# ── SAVE PREDICTIONS FOR ERROR ANALYSIS ─────────────────────
+# Collect predictions + targets from test_loader
 
+model.eval()
+all_preds = []
+all_targets = []
+
+with torch.no_grad():
+    for x, y in test_loader:
+        x = x.to(DEVICE)
+        y = y.to(DEVICE)
+
+        out = model(x)
+
+        all_preds.append(out.cpu().numpy())
+        all_targets.append(y.cpu().numpy())
+
+preds = np.concatenate(all_preds, axis=0)   # (samples, N)
+targets = np.concatenate(all_targets, axis=0)
+
+# Inverse transform
+preds_real = preds * (max_vals - min_vals) + min_vals
+targets_real = targets * (max_vals - min_vals) + min_vals
+
+# Save
+np.save(f"{SAVE_DIR}/lstm_preds_h{HORIZON}.npy", preds_real)
+np.save(f"{SAVE_DIR}/lstm_targets_h{HORIZON}.npy", targets_real)
+
+print("Saved predictions for error analysis.")
 print(f"MAE  : {test_mae:.2f}")
 print(f"RMSE : {test_rmse:.2f}")
 print(f"MAPE : {test_mape:.1f}%")
