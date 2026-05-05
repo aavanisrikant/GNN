@@ -211,6 +211,7 @@ targets_real = targets * (max_vals - min_vals) + min_vals
 # Save
 np.save(f"{SAVE_DIR}/lstm_preds_h{HORIZON}.npy", preds_real)
 np.save(f"{SAVE_DIR}/lstm_targets_h{HORIZON}.npy", targets_real)
+np.save(f"{SAVE_DIR}/time_index_h{HORIZON}.npy", time_index_test)
 
 print("Saved predictions for error analysis.")
 print(f"MAE  : {test_mae:.2f}")
