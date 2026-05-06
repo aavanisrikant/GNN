@@ -58,11 +58,11 @@ print(station_df.sort_values("error")[
 
 # ── SHORT NAME LOOKUP ─────────────────────────────────────────────────────────
 SHORT_NAMES = {
-    "Bandra Kurla Complex Mumbai IITM":                    "BKC",
-    "Bandra Kurla Complex Mumbai MPCB":                    "BKC",
+    "Bandra Kurla Complex Mumbai IITM":                    "BKC-IITM",
+    "Bandra Kurla Complex Mumbai MPCB":                    "BKC-MPCB",
     "Bandra Mumbai MPCB":                                  "Bandra",
-    "Borivali East Mumbai IITM":                           "Borivali E",
-    "Borivali East Mumbai MPCB":                           "Borivali E",
+    "Borivali East Mumbai IITM":                           "Borivali-IITM",
+    "Borivali East Mumbai MPCB":                           "Borivali-MPCB",
     "Byculla Mumbai BMC":                                  "Byculla",
     "Chakala-Andheri East Mumbai IITM":                    "Chakala",
     "Chembur Mumbai MPCB":                                 "Chembur",
@@ -111,14 +111,13 @@ for spine in ax.spines.values():
 ax.grid(True, color="white", linewidth=1.0, linestyle="-", zorder=0)
 ax.set_axisbelow(True)
 
-norm  = Normalize(vmin=station_error.min(), vmax=station_error.max())
-cmap  = plt.cm.RdYlGn_r
-sizes = ((station_error - station_error.min()) /
-         (station_error.max() - station_error.min() + 1e-8) * 1200 + 80)
+norm = Normalize(vmin=station_error.min(), vmax=station_error.max())
+cmap = plt.cm.RdYlGn_r
 
+# ALL bubbles same size — colour alone encodes MAE
 sc = ax.scatter(
     station_df["lon"], station_df["lat"],
-    s          = sizes,
+    s          = 280,
     c          = station_error,
     cmap       = cmap,
     norm       = norm,
@@ -128,12 +127,13 @@ sc = ax.scatter(
     zorder     = 3,
 )
 
+# Labels — uniform 8pt bold, white halo
 for _, row in station_df.iterrows():
     label = short(row["station"])
     txt   = ax.annotate(
         label,
         xy         = (row["lon"], row["lat"]),
-        xytext     = (0, 9),
+        xytext     = (0, 10),
         textcoords = "offset points",
         fontsize   = 8,
         fontfamily = "DejaVu Sans",
@@ -147,45 +147,16 @@ for _, row in station_df.iterrows():
         pe.withStroke(linewidth=3, foreground="#F5F5F3")
     ])
 
+# Colourbar only
 cb = plt.colorbar(sc, ax=ax, fraction=0.025, pad=0.015, aspect=30)
-cb.set_label("Mean Absolute Error (AQI units)", fontsize=10, color="#444", labelpad=10)
+cb.set_label("Mean Absolute Error (AQI units)", fontsize=10,
+             color="#444", labelpad=10)
 cb.ax.tick_params(labelsize=9, colors="#555")
 cb.outline.set_visible(False)
 
-# Bubble size legend
-ref_errors = [station_error.min(),
-              (station_error.min() + station_error.max()) / 2,
-              station_error.max()]
-ref_labels = [f"Low  ({ref_errors[0]:.1f})",
-              f"Mid  ({ref_errors[1]:.1f})",
-              f"High ({ref_errors[2]:.1f})"]
-ref_sizes  = [((e - station_error.min()) /
-               (station_error.max() - station_error.min() + 1e-8) * 1200 + 80)
-              for e in ref_errors]
-
-for sz, lbl in zip(ref_sizes, ref_labels):
-    ax.scatter([], [], s=sz, color="#aaaaaa", alpha=0.75,
-               edgecolors="white", linewidths=1.2, label=lbl)
-
-legend = ax.legend(
-    title          = "MAE scale",
-    title_fontsize = 8,
-    fontsize       = 8,
-    frameon        = True,
-    facecolor      = "#F5F5F3",
-    edgecolor      = "#cccccc",
-    loc            = "lower left",
-    labelspacing   = 1.2,
-    handletextpad  = 1.0,
-    borderpad      = 0.9,
-    scatterpoints  = 1,
-)
-legend.get_title().set_color("#555")
-legend.get_frame().set_linewidth(0.5)
-
 ax.set_title("LSTM Baseline — Prediction Error by Station",
              fontsize=14, fontweight="bold", color="#1a1a1a", pad=14, loc="left")
-ax.annotate("Bubble size and colour both encode MAE — larger and redder = higher error",
+ax.annotate("Colour encodes MAE — redder = higher error",
             xy=(0, 1.012), xycoords="axes fraction",
             fontsize=8.5, color="#888", style="italic")
 ax.set_xlabel("Longitude", fontsize=10, color="#666", labelpad=8)
@@ -199,7 +170,6 @@ plt.savefig(f"{PLOT_DIR}/error_by_station.png", dpi=180,
             bbox_inches="tight", facecolor=fig.get_facecolor())
 plt.show()
 print("Saved error_by_station.png")
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. ERROR BY HOUR
