@@ -1,10 +1,10 @@
+# src/error_analysis.py
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
-from matplotlib.patches import Patch
 from matplotlib.colors import Normalize
-from matplotlib.cm import ScalarMappable
+from matplotlib.patches import Patch
 from pathlib import Path
 
 # ── CONFIG ───────────────────────────────────────────────────────────────────
@@ -22,7 +22,7 @@ station_df = pd.read_csv(STATION_FILE)
 S, N       = preds.shape
 print(f"Samples: {S} | Stations: {N}")
 
-# ── TIMESTAMPS ───────────────────────────────────────────────────────────────
+# ── TIMESTAMPS ────────────────────────────────────────────────────────────────
 raw_ts = pd.to_datetime(
     pd.read_csv(f"{PROC_DIR}/clean_cpcb.csv", usecols=["timestamp"])["timestamp"]
 ).drop_duplicates().sort_values().reset_index(drop=True)
@@ -31,53 +31,90 @@ T_total    = len(raw_ts)
 val_end    = int(T_total * 0.85)
 time_index = raw_ts.iloc[val_end : val_end + S].reset_index(drop=True)
 
-# If still mismatched, fall back to just repeating hours 0–23 cyclically
 if len(time_index) != S:
     print(f"Warning: timestamp length {len(time_index)} != S {S}, using cyclic hours")
     hours_arr  = np.arange(S) % 24
     months_arr = None
 else:
-    hours_arr  = time_index.dt.hour.values    # (S,)
-    months_arr = time_index.dt.month.values   # (S,)
+    hours_arr  = time_index.dt.hour.values
+    months_arr = time_index.dt.month.values
 
-print(f"Test period: {time_index.iloc[0] if len(time_index) else 'unknown'} → "
-      f"{time_index.iloc[-1] if len(time_index) else 'unknown'}")
+print(f"Test period: {time_index.iloc[0]} → {time_index.iloc[-1]}")
 
-# ── ERRORS ───────────────────────────────────────────────────────────────────
-errors        = np.abs(preds - targets)   # (S, N)
+# ── ERRORS ────────────────────────────────────────────────────────────────────
+errors        = np.abs(preds - targets)   # (S, N) real AQI units
 station_error = errors.mean(axis=0)       # (N,)
+errors_flat   = errors.flatten()          # (S*N,)
 station_df["error"] = station_error
 
 print(f"\nOverall MAE: {errors.mean():.2f} AQI units")
 print("\nTop 5 worst stations:")
-print(station_df.sort_values("error", ascending=False)[["station","error"]].head().to_string(index=False))
+print(station_df.sort_values("error", ascending=False)[
+    ["station", "error"]].head().to_string(index=False))
 print("\nTop 5 best stations:")
-print(station_df.sort_values("error")[["station","error"]].head().to_string(index=False))
+print(station_df.sort_values("error")[
+    ["station", "error"]].head().to_string(index=False))
+
+
+# ── SHORT NAME LOOKUP ─────────────────────────────────────────────────────────
+SHORT_NAMES = {
+    "Bandra Kurla Complex Mumbai IITM":                    "BKC",
+    "Bandra Kurla Complex Mumbai MPCB":                    "BKC",
+    "Bandra Mumbai MPCB":                                  "Bandra",
+    "Borivali East Mumbai IITM":                           "Borivali E",
+    "Borivali East Mumbai MPCB":                           "Borivali E",
+    "Byculla Mumbai BMC":                                  "Byculla",
+    "Chakala-Andheri East Mumbai IITM":                    "Chakala",
+    "Chembur Mumbai MPCB":                                 "Chembur",
+    "Chhatrapati Shivaji Intl. Airport (T2) Mumbai MPCB":  "Airport T2",
+    "Colaba Mumbai MPCB":                                  "Colaba",
+    "Deonar Mumbai IITM":                                  "Deonar",
+    "Ghatkopar Mumbai BMC":                                "Ghatkopar",
+    "Kandivali East Mumbai MPCB":                          "Kandivali E",
+    "Kandivali West Mumbai BMC":                           "Kandivali W",
+    "Kherwadi Bandra East Mumbai MPCB":                    "Kherwadi",
+    "Khindipada-Bhandup West Mumbai IITM":                 "Bhandup W",
+    "Kurla Mumbai MPCB":                                   "Kurla",
+    "Malad West Mumbai IITM":                              "Malad W",
+    "Mazgaon Mumbai IITM":                                 "Mazgaon",
+    "Mindspace-Malad West Mumbai MPCB":                    "Mindspace",
+    "Mulund West Mumbai MPCB":                             "Mulund W",
+    "Navy Nagar-Colaba Mumbai IITM":                       "Navy Nagar",
+    "Powai Mumbai MPCB":                                   "Powai",
+    "Sewri Mumbai BMC":                                    "Sewri",
+    "Shivaji Nagar Mumbai BMC":                            "Shivaji Ngr",
+    "Siddharth Nagar-Worli Mumbai IITM":                   "Worli",
+    "Sion Mumbai MPCB":                                    "Sion",
+    "Vasai West Mumbai MPCB":                              "Vasai W",
+    "Vile Parle West Mumbai MPCB":                         "Vile Parle W",
+    "Worli Mumbai -MPCB":                                  "Worli MPCB",
+}
+
+def short(name):
+    if name in SHORT_NAMES:
+        return SHORT_NAMES[name]
+    for suffix in [" IITM", " MPCB", " BMC", "- MPCB"]:
+        name = name.replace(suffix, "")
+    return name.replace("Mumbai", "").replace("-", " ").strip().rstrip(",")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 1. STATION MAP  —  clean, Tableau-style
+# 1. STATION MAP
 # ══════════════════════════════════════════════════════════════════════════════
-fig, ax = plt.subplots(figsize=(13, 11))
-fig.patch.set_facecolor("#F7F7F5")
-ax.set_facecolor("#F7F7F5")
+fig, ax = plt.subplots(figsize=(13, 10))
+fig.patch.set_facecolor("#F5F5F3")
+ax.set_facecolor("#F5F5F3")
 
-# Remove spines
 for spine in ax.spines.values():
     spine.set_visible(False)
 
-# Grid
-ax.grid(True, color="white", linewidth=1.2, linestyle="-", zorder=0)
+ax.grid(True, color="white", linewidth=1.0, linestyle="-", zorder=0)
 ax.set_axisbelow(True)
 
-# Colour scale
-norm   = Normalize(vmin=station_error.min(), vmax=station_error.max())
-cmap   = plt.cm.RdYlGn_r
-colors_sc = [cmap(norm(e)) for e in station_error]
-
-# Draw bubbles — size proportional to error
+norm  = Normalize(vmin=station_error.min(), vmax=station_error.max())
+cmap  = plt.cm.RdYlGn_r
 sizes = ((station_error - station_error.min()) /
-         (station_error.max() - station_error.min()) * 900 + 100)
+         (station_error.max() - station_error.min() + 1e-8) * 1200 + 80)
 
 sc = ax.scatter(
     station_df["lon"], station_df["lat"],
@@ -91,61 +128,75 @@ sc = ax.scatter(
     zorder     = 3,
 )
 
-# Smart label placement — avoid overlap by nudging based on position
-lons = station_df["lon"].values
-lats = station_df["lat"].values
-
-# Pre-compute label offsets (manual nudge for dense areas)
-lon_center = lons.mean()
-for i, row in station_df.iterrows():
-    short = row["station"].replace("Mumbai", "").replace("-", " ").strip()
-    # Remove agency suffix (IITM / MPCB / BMC)
-    for suffix in [" IITM", " MPCB", " BMC", "- MPCB"]:
-        short = short.replace(suffix, "")
-    short = short.strip().rstrip(",")
-
-    # Nudge label left or right based on which side of map
-    ha     = "left"  if row["lon"] < lon_center else "right"
-    x_off  = 6       if row["lon"] < lon_center else -6
-
-    txt = ax.annotate(
-        short,
-        xy        = (row["lon"], row["lat"]),
-        xytext    = (x_off, 8),
-        textcoords= "offset points",
-        fontsize  = 7.5,
-        fontweight= "500",
-        color     = "#2c2c2c",
-        ha        = ha,
-        va        = "bottom",
-        zorder    = 5,
+for _, row in station_df.iterrows():
+    label = short(row["station"])
+    txt   = ax.annotate(
+        label,
+        xy         = (row["lon"], row["lat"]),
+        xytext     = (0, 9),
+        textcoords = "offset points",
+        fontsize   = 8,
+        fontfamily = "DejaVu Sans",
+        fontweight = "bold",
+        color      = "#1a1a1a",
+        ha         = "center",
+        va         = "bottom",
+        zorder     = 6,
     )
-    # White halo behind text so it's readable over bubbles
     txt.set_path_effects([
-        pe.withStroke(linewidth=2.5, foreground="#F7F7F5")
+        pe.withStroke(linewidth=3, foreground="#F5F5F3")
     ])
 
-# Colourbar
-cb = plt.colorbar(sc, ax=ax, fraction=0.03, pad=0.02)
-cb.set_label("Mean Absolute Error (AQI units)", fontsize=10, color="#444")
-cb.ax.tick_params(labelsize=9, colors="#444")
+cb = plt.colorbar(sc, ax=ax, fraction=0.025, pad=0.015, aspect=30)
+cb.set_label("Mean Absolute Error (AQI units)", fontsize=10, color="#444", labelpad=10)
+cb.ax.tick_params(labelsize=9, colors="#555")
 cb.outline.set_visible(False)
 
-# Titles and labels
+# Bubble size legend
+ref_errors = [station_error.min(),
+              (station_error.min() + station_error.max()) / 2,
+              station_error.max()]
+ref_labels = [f"Low  ({ref_errors[0]:.1f})",
+              f"Mid  ({ref_errors[1]:.1f})",
+              f"High ({ref_errors[2]:.1f})"]
+ref_sizes  = [((e - station_error.min()) /
+               (station_error.max() - station_error.min() + 1e-8) * 1200 + 80)
+              for e in ref_errors]
+
+for sz, lbl in zip(ref_sizes, ref_labels):
+    ax.scatter([], [], s=sz, color="#aaaaaa", alpha=0.75,
+               edgecolors="white", linewidths=1.2, label=lbl)
+
+legend = ax.legend(
+    title          = "MAE scale",
+    title_fontsize = 8,
+    fontsize       = 8,
+    frameon        = True,
+    facecolor      = "#F5F5F3",
+    edgecolor      = "#cccccc",
+    loc            = "lower left",
+    labelspacing   = 1.2,
+    handletextpad  = 1.0,
+    borderpad      = 0.9,
+    scatterpoints  = 1,
+)
+legend.get_title().set_color("#555")
+legend.get_frame().set_linewidth(0.5)
+
 ax.set_title("LSTM Baseline — Prediction Error by Station",
-             fontsize=15, fontweight="600", color="#1a1a1a", pad=16, loc="left")
+             fontsize=14, fontweight="bold", color="#1a1a1a", pad=14, loc="left")
+ax.annotate("Bubble size and colour both encode MAE — larger and redder = higher error",
+            xy=(0, 1.012), xycoords="axes fraction",
+            fontsize=8.5, color="#888", style="italic")
 ax.set_xlabel("Longitude", fontsize=10, color="#666", labelpad=8)
 ax.set_ylabel("Latitude",  fontsize=10, color="#666", labelpad=8)
 ax.tick_params(colors="#888", labelsize=9)
-
-# Subtitle annotation
-ax.annotate("Bubble size and colour both encode MAE — larger and redder = higher error",
-            xy=(0.01, 1.01), xycoords="axes fraction",
-            fontsize=8.5, color="#888", style="italic")
+ax.set_xlim(station_df["lon"].min() - 0.02, station_df["lon"].max() + 0.02)
+ax.set_ylim(station_df["lat"].min() - 0.02, station_df["lat"].max() + 0.04)
 
 plt.tight_layout()
-plt.savefig(f"{PLOT_DIR}/error_by_station.png", dpi=180, bbox_inches="tight",
-            facecolor=fig.get_facecolor())
+plt.savefig(f"{PLOT_DIR}/error_by_station.png", dpi=180,
+            bbox_inches="tight", facecolor=fig.get_facecolor())
 plt.show()
 print("Saved error_by_station.png")
 
@@ -153,12 +204,9 @@ print("Saved error_by_station.png")
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. ERROR BY HOUR
 # ══════════════════════════════════════════════════════════════════════════════
-# Use hours_arr (S,) — repeat N times to match errors.flatten() (S*N,)
-hour_repeated  = np.repeat(hours_arr, N)   # (S*N,)
-errors_flat    = errors.flatten()          # (S*N,)
-
-df_hour    = pd.DataFrame({"hour": hour_repeated, "error": errors_flat})
-hour_error = df_hour.groupby("hour")["error"].mean()
+hour_repeated = np.repeat(hours_arr, N)   # (S*N,)
+df_hour       = pd.DataFrame({"hour": hour_repeated, "error": errors_flat})
+hour_error    = df_hour.groupby("hour")["error"].mean()
 
 bar_colors = []
 for h in range(24):
@@ -170,28 +218,30 @@ for h in range(24):
         bar_colors.append("#A8BAC4")
 
 fig, ax = plt.subplots(figsize=(13, 5))
-fig.patch.set_facecolor("#F7F7F5")
-ax.set_facecolor("#F7F7F5")
+fig.patch.set_facecolor("#F5F5F3")
+ax.set_facecolor("#F5F5F3")
 for spine in ax.spines.values():
     spine.set_visible(False)
 ax.grid(axis="y", color="white", linewidth=1.2, zorder=0)
 ax.set_axisbelow(True)
 
 bars = ax.bar(hour_error.index, hour_error.values,
-              color=bar_colors, alpha=0.9, edgecolor="white", linewidth=0.8, zorder=3)
+              color=bar_colors, alpha=0.9, edgecolor="white",
+              linewidth=0.8, zorder=3)
 
-# Value labels on top of each bar
 for bar in bars:
-    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
-            f"{bar.get_height():.1f}", ha="center", va="bottom",
-            fontsize=6.5, color="#555")
+    ax.text(bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.01,
+            f"{bar.get_height():.2f}",
+            ha="center", va="bottom", fontsize=6.5, color="#666")
 
 ax.set_xticks(range(24))
-ax.set_xticklabels([f"{h:02d}:00" for h in range(24)], fontsize=8, rotation=45, color="#555")
+ax.set_xticklabels([f"{h:02d}:00" for h in range(24)],
+                   fontsize=8, rotation=45, color="#555")
 ax.set_xlabel("Hour of Day (IST)", fontsize=10, color="#666", labelpad=8)
 ax.set_ylabel("Mean MAE (AQI units)", fontsize=10, color="#666")
 ax.set_title("LSTM Baseline — Prediction Error by Hour of Day",
-             fontsize=14, fontweight="600", color="#1a1a1a", pad=14, loc="left")
+             fontsize=14, fontweight="bold", color="#1a1a1a", pad=14, loc="left")
 ax.tick_params(colors="#888", labelsize=9)
 
 legend = [Patch(color="#E05C2A", label="Rush hour  (7–9 am, 5–7 pm)"),
@@ -200,8 +250,8 @@ legend = [Patch(color="#E05C2A", label="Rush hour  (7–9 am, 5–7 pm)"),
 ax.legend(handles=legend, fontsize=8.5, frameon=False, loc="upper right")
 
 plt.tight_layout()
-plt.savefig(f"{PLOT_DIR}/error_by_hour.png", dpi=180, bbox_inches="tight",
-            facecolor=fig.get_facecolor())
+plt.savefig(f"{PLOT_DIR}/error_by_hour.png", dpi=180,
+            bbox_inches="tight", facecolor=fig.get_facecolor())
 plt.show()
 print("Saved error_by_hour.png")
 
@@ -209,8 +259,8 @@ print("Saved error_by_hour.png")
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. ERROR BY MONTH
 # ══════════════════════════════════════════════════════════════════════════════
-month_names = {1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",
-               7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec"}
+month_names = {1:"Jan", 2:"Feb", 3:"Mar", 4:"Apr", 5:"May",  6:"Jun",
+               7:"Jul", 8:"Aug", 9:"Sep", 10:"Oct", 11:"Nov", 12:"Dec"}
 
 if months_arr is not None:
     month_repeated = np.repeat(months_arr, N)
@@ -218,44 +268,46 @@ if months_arr is not None:
     month_error    = df_month.groupby("month")["error"].mean()
     month_labels   = [month_names[m] for m in month_error.index]
 
-    # Highlight Oct–Jan (Mumbai pollution season) in a warmer colour
     pollution_months = {10, 11, 12, 1}
     m_colors = ["#E05C2A" if m in pollution_months else "#A8BAC4"
                 for m in month_error.index]
 
     fig, ax = plt.subplots(figsize=(12, 5))
-    fig.patch.set_facecolor("#F7F7F5")
-    ax.set_facecolor("#F7F7F5")
+    fig.patch.set_facecolor("#F5F5F3")
+    ax.set_facecolor("#F5F5F3")
     for spine in ax.spines.values():
         spine.set_visible(False)
     ax.grid(axis="y", color="white", linewidth=1.2, zorder=0)
     ax.set_axisbelow(True)
 
     bars = ax.bar(month_labels, month_error.values,
-                  color=m_colors, alpha=0.9, edgecolor="white", linewidth=0.8, zorder=3)
+                  color=m_colors, alpha=0.9, edgecolor="white",
+                  linewidth=0.8, zorder=3)
 
     for bar in bars:
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
-                f"{bar.get_height():.1f}", ha="center", va="bottom",
-                fontsize=8, color="#555")
+        ax.text(bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.01,
+                f"{bar.get_height():.2f}",
+                ha="center", va="bottom", fontsize=8, color="#666")
 
     ax.set_xlabel("Month", fontsize=10, color="#666", labelpad=8)
     ax.set_ylabel("Mean MAE (AQI units)", fontsize=10, color="#666")
     ax.set_title("LSTM Baseline — Prediction Error by Month",
-                 fontsize=14, fontweight="600", color="#1a1a1a", pad=14, loc="left")
+                 fontsize=14, fontweight="bold", color="#1a1a1a", pad=14, loc="left")
     ax.tick_params(colors="#888", labelsize=10)
+    ax.annotate(
+        "Oct–Jan highlighted — Mumbai's post-monsoon pollution season",
+        xy=(0, 1.012), xycoords="axes fraction",
+        fontsize=8.5, color="#888", style="italic"
+    )
 
-    legend = [Patch(color="#E05C2A", label="Mumbai pollution season (Oct–Jan)"),
+    legend = [Patch(color="#E05C2A", label="Pollution season (Oct–Jan)"),
               Patch(color="#A8BAC4", label="Other months")]
     ax.legend(handles=legend, fontsize=8.5, frameon=False)
 
-    ax.annotate("Higher error in Oct–Jan reflects greater AQI variability during post-monsoon season",
-                xy=(0.01, 1.01), xycoords="axes fraction",
-                fontsize=8, color="#888", style="italic")
-
     plt.tight_layout()
-    plt.savefig(f"{PLOT_DIR}/error_by_month.png", dpi=180, bbox_inches="tight",
-                facecolor=fig.get_facecolor())
+    plt.savefig(f"{PLOT_DIR}/error_by_month.png", dpi=180,
+                bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.show()
     print("Saved error_by_month.png")
 else:
@@ -274,12 +326,14 @@ plot_labels = ["Worst 1", "Worst 2", "Worst 3", "Best"]
 N_SHOW = min(24 * 30, S)
 
 fig, axes = plt.subplots(4, 1, figsize=(15, 11))
-fig.patch.set_facecolor("#F7F7F5")
-fig.suptitle("LSTM Baseline — Predicted vs Actual AQI (last 30 days of test set)",
-             fontsize=13, fontweight="600", color="#1a1a1a", y=1.01)
+fig.patch.set_facecolor("#F5F5F3")
+fig.suptitle(
+    "LSTM Baseline — Predicted vs Actual AQI  (last 30 days of test set)",
+    fontsize=13, fontweight="bold", color="#1a1a1a", y=1.01
+)
 
 for ax, idx, label in zip(axes, plot_idxs, plot_labels):
-    ax.set_facecolor("#F7F7F5")
+    ax.set_facecolor("#F5F5F3")
     for spine in ax.spines.values():
         spine.set_visible(False)
     ax.grid(axis="y", color="white", linewidth=1.0, zorder=0)
@@ -288,24 +342,24 @@ for ax, idx, label in zip(axes, plot_idxs, plot_labels):
     ax.plot(targets[-N_SHOW:, idx], label="Actual",
             color="#2A6496", lw=1.2, alpha=0.9, zorder=3)
     ax.plot(preds[-N_SHOW:,   idx], label="Predicted",
-            color="#E05C2A", lw=1.2, alpha=0.8, zorder=4)
+            color="#E05C2A", lw=1.2, alpha=0.85, zorder=4)
     ax.fill_between(range(N_SHOW),
                     targets[-N_SHOW:, idx],
                     preds[-N_SHOW:,   idx],
                     alpha=0.07, color="#E05C2A")
 
-    short = station_df.iloc[idx]["station"].replace("Mumbai","").strip()
-    for suffix in [" IITM", " MPCB", " BMC", "- MPCB"]:
-        short = short.replace(suffix, "")
-    ax.set_title(f"{label}: {short.strip()}   MAE = {station_error[idx]:.1f} AQI units",
-                 fontsize=9, color="#333", loc="left", pad=6)
+    name  = short(station_df.iloc[idx]["station"])
+    ax.set_title(
+        f"{label}: {name}   —   MAE = {station_error[idx]:.2f} AQI units",
+        fontsize=9, color="#333", loc="left", pad=6
+    )
     ax.set_ylabel("AQI", fontsize=8, color="#666")
     ax.legend(fontsize=7.5, frameon=False, loc="upper right")
     ax.tick_params(labelsize=7, colors="#888")
 
 plt.tight_layout()
-plt.savefig(f"{PLOT_DIR}/pred_vs_actual.png", dpi=180, bbox_inches="tight",
-            facecolor=fig.get_facecolor())
+plt.savefig(f"{PLOT_DIR}/pred_vs_actual.png", dpi=180,
+            bbox_inches="tight", facecolor=fig.get_facecolor())
 plt.show()
 print("Saved pred_vs_actual.png")
 
@@ -316,9 +370,9 @@ peak_month = int(month_error.idxmax()) if months_arr is not None else None
 
 print("\n── ERROR ANALYSIS SUMMARY ───────────────────────────────")
 print(f"  Overall MAE     : {errors.mean():.2f} AQI units")
-print(f"  Worst station   : {station_df.sort_values('error', ascending=False).iloc[0]['station']}")
+print(f"  Worst station   : {short(station_df.sort_values('error', ascending=False).iloc[0]['station'])}")
 print(f"                    MAE = {station_error.max():.2f}")
-print(f"  Best station    : {station_df.sort_values('error').iloc[0]['station']}")
+print(f"  Best station    : {short(station_df.sort_values('error').iloc[0]['station'])}")
 print(f"                    MAE = {station_error.min():.2f}")
 print(f"  Peak error hour : {peak_hour:02d}:00")
 if peak_month:
