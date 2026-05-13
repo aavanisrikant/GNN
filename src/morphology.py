@@ -5,15 +5,9 @@ import geopandas as gpd
 
 from shapely.geometry import (
     Point,
-    MultiLineString,
     LineString
 )
-
-from shapely.ops import (
-    nearest_points,
-    unary_union
-)
-
+from shapely.ops import nearest_points
 from pathlib import Path
 
 import json
@@ -52,74 +46,33 @@ ox.settings.use_cache = True
 ox.settings.cache_folder = "osm_cache"
 ox.settings.timeout = 180
 
-# ── LOAD MUMBAI BOUNDARY SAFELY ──────────────────────────────────────────
-print("Loading Mumbai boundary...")
+# ── SIMPLE MUMBAI COASTLINE PROXY ────────────────────────────────────────
+print("Creating Mumbai coastline proxy...")
 
-# IMPORTANT:
-# which_result=2 usually returns the polygon
-# instead of the city-center point
-MUMBAI_GDF = ox.geocode_to_gdf(
-    "Mumbai, Maharashtra, India",
-    which_result=2
-)
+# Approximate Mumbai western coastline
+# Coordinates are (longitude, latitude)
 
-print(
-    "Returned geometry types:"
-)
+coastline_coords = [
 
-print(MUMBAI_GDF.geom_type)
+    (72.775, 19.270),
+    (72.790, 19.230),
+    (72.800, 19.180),
+    (72.805, 19.130),
+    (72.810, 19.080),
+    (72.815, 19.030),
+    (72.820, 18.980),
+    (72.825, 18.930),
+    (72.830, 18.880),
 
-# Keep polygon geometries only
-MUMBAI_GDF = MUMBAI_GDF[
-    MUMBAI_GDF.geom_type.isin(
-        ["Polygon", "MultiPolygon"]
-    )
 ]
 
-if MUMBAI_GDF.empty:
-
-    raise ValueError(
-        "No polygon geometry returned "
-        "for Mumbai."
-    )
-
-# Merge polygons safely
-MUMBAI_GEOM = unary_union(
-    MUMBAI_GDF.geometry
-)
-
-# SAFER coastline extraction
-if MUMBAI_GEOM.geom_type == "Polygon":
-
-    MUMBAI_COASTLINE = (
-        MUMBAI_GEOM.exterior
-    )
-
-elif MUMBAI_GEOM.geom_type == "MultiPolygon":
-
-    MUMBAI_COASTLINE = unary_union(
-        [
-            poly.exterior
-            for poly in MUMBAI_GEOM.geoms
-        ]
-    )
-
-else:
-
-    raise ValueError(
-        f"Unexpected geometry type: "
-        f"{MUMBAI_GEOM.geom_type}"
-    )
-
-print(
-    f"Coastline geometry type: "
-    f"{MUMBAI_COASTLINE.geom_type}"
+MUMBAI_COASTLINE = LineString(
+    coastline_coords
 )
 
 print(
-    "Mumbai boundary loaded successfully."
+    "Mumbai coastline proxy loaded successfully."
 )
-
 # ── ROAD TYPE DEFINITIONS ────────────────────────────────────────────────
 ARTERIAL_TYPES = {
     "motorway",
