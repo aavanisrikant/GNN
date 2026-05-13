@@ -2,9 +2,20 @@ import pandas as pd
 import numpy as np
 import osmnx as ox
 import geopandas as gpd
-from shapely.geometry import Point, MultiLineString, LineString
-from shapely.ops import nearest_points, unary_union
+
+from shapely.geometry import (
+    Point,
+    MultiLineString,
+    LineString
+)
+
+from shapely.ops import (
+    nearest_points,
+    unary_union
+)
+
 from pathlib import Path
+
 import json
 import warnings
 import os
@@ -12,6 +23,7 @@ import time
 
 warnings.filterwarnings("ignore")
 
+# ── CONFIG ────────────────────────────────────────────────────────────────
 RADIUS_M = 2000
 
 COORDS_PATH = "data/processed/station_coords.csv"
@@ -21,33 +33,54 @@ CACHE_DIR = "data/morphology_cache"
 SAVE_CSV = "data/processed/node_static_features.csv"
 SAVE_NPY = "data/processed/node_static_features.npy"
 
+# Better CRS for Mumbai region
 UTM_CRS = "EPSG:32644"
 
-Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
-Path("data/processed").mkdir(parents=True, exist_ok=True)
+Path(CACHE_DIR).mkdir(
+    parents=True,
+    exist_ok=True
+)
 
-#  OSMNX 
+Path("data/processed").mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+# ── OSMNX SETTINGS ────────────────────────────────────────────────────────
 ox.settings.log_console = False
 ox.settings.use_cache = True
 ox.settings.cache_folder = "osm_cache"
 ox.settings.timeout = 180
 
+# ── LOAD MUMBAI BOUNDARY SAFELY ──────────────────────────────────────────
 print("Loading Mumbai boundary...")
 
-try:
+# IMPORTANT:
+# which_result=2 usually returns the polygon
+# instead of the city-center point
+MUMBAI_GDF = ox.geocode_to_gdf(
+    "Mumbai, Maharashtra, India",
+    which_result=2
+)
 
-    MUMBAI_GDF = ox.geocode_to_gdf(
-        {
-            "city": "Mumbai",
-            "country": "India"
-        }
+print(
+    "Returned geometry types:"
+)
+
+print(MUMBAI_GDF.geom_type)
+
+# Keep polygon geometries only
+MUMBAI_GDF = MUMBAI_GDF[
+    MUMBAI_GDF.geom_type.isin(
+        ["Polygon", "MultiPolygon"]
     )
+]
 
-except Exception:
+if MUMBAI_GDF.empty:
 
-    MUMBAI_GDF = ox.geocode_to_gdf(
-        "Mumbai, India",
-        which_result=1
+    raise ValueError(
+        "No polygon geometry returned "
+        "for Mumbai."
     )
 
 # Merge polygons safely
@@ -83,8 +116,11 @@ print(
     f"{MUMBAI_COASTLINE.geom_type}"
 )
 
-print("Mumbai boundary loaded successfully.")
+print(
+    "Mumbai boundary loaded successfully."
+)
 
+# ── ROAD TYPE DEFINITIONS ────────────────────────────────────────────────
 ARTERIAL_TYPES = {
     "motorway",
     "trunk",
@@ -96,6 +132,7 @@ ARTERIAL_TYPES = {
     "secondary_link",
 }
 
+# ── LANDUSE GROUPINGS ─────────────────────────────────────────────────────
 LANDUSE_CATEGORIES = {
 
     "industrial": {
@@ -122,6 +159,7 @@ LANDUSE_CATEGORIES = {
     },
 }
 
+# ── STATIC FEATURE COLUMNS ────────────────────────────────────────────────
 STATIC_COLS = [
     "road_density",
     "arterial_fraction",
@@ -132,6 +170,7 @@ STATIC_COLS = [
     "coastline_distance",
 ]
 
+# ── HELPERS ───────────────────────────────────────────────────────────────
 def is_arterial(hw):
 
     if hw is None:
@@ -178,6 +217,7 @@ def format_float(val, precision=5):
     return f"{val:.{precision}f}"
 
 
+# ── ROAD FEATURES ─────────────────────────────────────────────────────────
 def get_road_features(lat, lon):
 
     for attempt in range(3):
@@ -195,11 +235,14 @@ def get_road_features(lat, lon):
                 nodes=False
             )
 
-            edges_proj = edges.to_crs(UTM_CRS)
+            edges_proj = edges.to_crs(
+                UTM_CRS
+            )
 
-            # safer metric length
             total_length = (
-                edges_proj.geometry.length.sum()
+                edges_proj.geometry
+                .length
+                .sum()
             )
 
             buffer_area = (
@@ -217,7 +260,8 @@ def get_road_features(lat, lon):
 
             arterial_length = (
                 edges_proj.loc[art_mask]
-                .geometry.length.sum()
+                .geometry.length
+                .sum()
             )
 
             arterial_fraction = (
@@ -241,6 +285,8 @@ def get_road_features(lat, lon):
 
     return np.nan, np.nan
 
+
+# ── LANDUSE FEATURES ──────────────────────────────────────────────────────
 def get_landuse_features(lat, lon):
 
     fallback = {
@@ -285,7 +331,9 @@ def get_landuse_features(lat, lon):
             RADIUS_M
         )
 
-        gdf_proj = gdf.to_crs(UTM_CRS)
+        gdf_proj = gdf.to_crs(
+            UTM_CRS
+        )
 
         gdf_proj = gdf_proj[
             gdf_proj.geometry.notna()
@@ -296,7 +344,9 @@ def get_landuse_features(lat, lon):
         )
 
         gdf_proj = gdf_proj[
-            gdf_proj.geometry.intersects(buffer)
+            gdf_proj.geometry.intersects(
+                buffer
+            )
         ].copy()
 
         if gdf_proj.empty:
@@ -381,13 +431,14 @@ def get_building_density(lat, lon):
             RADIUS_M
         )
 
-        gdf_proj = gdf.to_crs(UTM_CRS)
+        gdf_proj = gdf.to_crs(
+            UTM_CRS
+        )
 
         gdf_proj = gdf_proj[
             gdf_proj.geometry.notna()
         ]
 
-        # safer future-proof geom filtering
         gdf_proj = gdf_proj[
             gdf_proj.geom_type.isin(
                 ["Polygon", "MultiPolygon"]
@@ -399,7 +450,9 @@ def get_building_density(lat, lon):
         )
 
         gdf_proj = gdf_proj[
-            gdf_proj.geometry.intersects(buffer)
+            gdf_proj.geometry.intersects(
+                buffer
+            )
         ].copy()
 
         if gdf_proj.empty:
@@ -428,7 +481,10 @@ def get_building_density(lat, lon):
 # ── COASTLINE DISTANCE ────────────────────────────────────────────────────
 def get_coastline_distance(lat, lon):
 
-    station_pt = Point(lon, lat)
+    station_pt = Point(
+        lon,
+        lat
+    )
 
     nearest_pt = nearest_points(
         station_pt,
@@ -453,11 +509,16 @@ def get_coastline_distance(lat, lon):
 
 
 # ── LOAD STATIONS ─────────────────────────────────────────────────────────
-df = pd.read_csv(COORDS_PATH)
+df = pd.read_csv(
+    COORDS_PATH
+)
 
 features = []
 
-print(f"\nProcessing {len(df)} stations...\n")
+print(
+    f"\nProcessing "
+    f"{len(df)} stations...\n"
+)
 
 # ── MAIN LOOP ─────────────────────────────────────────────────────────────
 for idx, row in df.iterrows():
@@ -478,7 +539,8 @@ for idx, row in df.iterrows():
     )
 
     print(
-        f"[{idx+1}/{len(df)}] {station}"
+        f"[{idx+1}/{len(df)}] "
+        f"{station}"
     )
 
     # ── CACHE HIT ─────────────────────────────────────────────────────────
@@ -490,6 +552,7 @@ for idx, row in df.iterrows():
             feats = json.load(f)
 
         features.append(feats)
+
         continue
 
     feats = {
@@ -563,7 +626,8 @@ for idx, row in df.iterrows():
         feats["building_density"] = bd
 
         print(
-            f"  building_density={bd:.4f}"
+            f"  building_density="
+            f"{bd:.4f}"
         )
 
     except Exception as e:
@@ -609,7 +673,9 @@ for idx, row in df.iterrows():
     features.append(feats)
 
 # ── BUILD DATAFRAME ───────────────────────────────────────────────────────
-feat_df = pd.DataFrame(features)
+feat_df = pd.DataFrame(
+    features
+)
 
 # ── FILL MISSING VALUES ──────────────────────────────────────────────────
 for col in STATIC_COLS:
@@ -617,7 +683,8 @@ for col in STATIC_COLS:
     if col in feat_df.columns:
 
         median_val = (
-            feat_df[col].median()
+            feat_df[col]
+            .median()
         )
 
         feat_df[col] = (
@@ -635,13 +702,14 @@ feat_df.to_csv(
     index=False
 )
 
-print(f"\nSaved CSV → {SAVE_CSV}")
+print(
+    f"\nSaved CSV → {SAVE_CSV}"
+)
 
 # ── NORMALISE FEATURES ───────────────────────────────────────────────────
 # NOTE:
-# For final experiments:
-# fit min/max ONLY on training nodes
-# to avoid train-test leakage.
+# For final train/test experiments,
+# fit scaler only on training set.
 
 X_static = feat_df[
     STATIC_COLS
@@ -671,8 +739,13 @@ np.save(
     X_max
 )
 
-print(f"Saved NPY → {SAVE_NPY}")
-print(f"Shape     → {X_norm.shape}")
+print(
+    f"Saved NPY → {SAVE_NPY}"
+)
+
+print(
+    f"Shape     → {X_norm.shape}"
+)
 
 # ── FEATURE SUMMARY ──────────────────────────────────────────────────────
 print("\nFeature Summary:")
@@ -685,4 +758,6 @@ for i, col in enumerate(STATIC_COLS):
         f"max={X_norm[:, i].max():.3f}"
     )
 
-print("\nMorphology extraction complete.")
+print(
+    "\nMorphology extraction complete."
+)
