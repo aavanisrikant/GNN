@@ -7,54 +7,39 @@ from torch_geometric.utils import add_self_loops
 from torch_geometric.data import Data
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. CUSTOM GCN LAYER (FROM SCRATCH USING MessagePassing)
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# CUSTOM GCN LAYER
+# ─────────────────────────────────────────────────────────────
 
 class TGCNGraphConv(MessagePassing):
+
     """
-    Custom Graph Convolution layer implemented from scratch using
-    PyTorch Geometric's MessagePassing API.
-
-    Implements the GCN update rule from Kipf & Welling (2017):
-
-        H' = D^(-1/2) Â D^(-1/2) H W
-
-    where:
-        Â = A + I   (self-loops added)
-        D = degree matrix of Â
-
-    MessagePassing flow:
-        message()   → compute message from neighbor j
-        aggregate() → sum incoming messages
-        update()    → final node update
+    Custom GCN layer implemented from scratch using
+    PyTorch Geometric MessagePassing.
     """
 
     def __init__(
         self,
-        in_channels: int,
-        out_channels: int,
-        bias: bool = True,
+        in_channels,
+        out_channels,
+        bias=True
     ):
 
-        # GCN uses SUM aggregation
         super().__init__(aggr="add")
 
         self.in_channels = in_channels
         self.out_channels = out_channels
 
-        # Linear transformation W
         self.linear = nn.Linear(
             in_channels,
             out_channels,
             bias=False
         )
 
-        # Optional bias
         if bias:
 
             self.bias = nn.Parameter(
-                torch.empty(out_channels)
+                torch.zeros(out_channels)
             )
 
         else:
@@ -66,7 +51,9 @@ class TGCNGraphConv(MessagePassing):
 
         self.reset_parameters()
 
-    # ── INITIALIZATION ────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
+    # PARAMETER INITIALIZATION
+    # ─────────────────────────────────────────────────────────
     def reset_parameters(self):
 
         nn.init.xavier_uniform_(
@@ -79,65 +66,42 @@ class TGCNGraphConv(MessagePassing):
                 self.bias
             )
 
-    # ── FORWARD PASS ──────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
+    # FORWARD
+    # ─────────────────────────────────────────────────────────
     def forward(
         self,
-        x: torch.Tensor,
-        edge_index: torch.Tensor,
-        edge_weight: torch.Tensor = None,
-    ) -> torch.Tensor:
-
-        """
-        Args:
-            x:
-                Node feature matrix
-                Shape: (N, in_channels)
-
-            edge_index:
-                COO graph connectivity
-                Shape: (2, E)
-
-            edge_weight:
-                Optional edge weights
-                Shape: (E,)
-
-        Returns:
-            Updated node features
-            Shape: (N, out_channels)
-        """
+        x,
+        edge_index,
+        edge_weight=None
+    ):
 
         n_nodes = x.size(0)
 
-        # ────────────────────────────────────────────────────────────────
-        # STEP 1 — ADD SELF LOOPS
-        # ────────────────────────────────────────────────────────────────
+        # Add self loops
         edge_index, edge_weight = add_self_loops(
             edge_index=edge_index,
             edge_attr=edge_weight,
             fill_value=1.0,
-            num_nodes=n_nodes,
+            num_nodes=n_nodes
         )
 
-        # If no edge weights supplied,
-        # assume all edges weight = 1
+        # Default edge weights
         if edge_weight is None:
 
             edge_weight = torch.ones(
                 edge_index.size(1),
                 dtype=x.dtype,
-                device=x.device,
+                device=x.device
             )
 
-        # ────────────────────────────────────────────────────────────────
-        # STEP 2 — COMPUTE NORMALIZATION
-        # ────────────────────────────────────────────────────────────────
         row, col = edge_index
 
-        # Weighted node degree
+        # Weighted degree
         deg = torch.zeros(
             n_nodes,
             dtype=x.dtype,
-            device=x.device,
+            device=x.device
         )
 
         deg.scatter_add_(
@@ -149,74 +113,52 @@ class TGCNGraphConv(MessagePassing):
         # D^(-1/2)
         deg_inv_sqrt = deg.pow(-0.5)
 
-        # Guard isolated nodes
         deg_inv_sqrt[
             deg_inv_sqrt == float("inf")
         ] = 0.0
 
-        # Final normalization coefficient:
-        #
-        # edge_weight / sqrt(deg_i * deg_j)
-        #
+        # Normalization
         norm = (
             edge_weight
             * deg_inv_sqrt[row]
             * deg_inv_sqrt[col]
         )
 
-        # ────────────────────────────────────────────────────────────────
-        # STEP 3 — LINEAR TRANSFORMATION
-        # ────────────────────────────────────────────────────────────────
+        # Linear transform
         x = self.linear(x)
 
-        # ────────────────────────────────────────────────────────────────
-        # STEP 4 — MESSAGE PASSING
-        # ────────────────────────────────────────────────────────────────
+        # Message passing
         out = self.propagate(
             edge_index=edge_index,
             x=x,
-            norm=norm,
+            norm=norm
         )
 
-        # ────────────────────────────────────────────────────────────────
-        # STEP 5 — BIAS
-        # ────────────────────────────────────────────────────────────────
+        # Bias
         if self.bias is not None:
 
             out = out + self.bias
 
         return out
 
-    # ── MESSAGE FUNCTION ─────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
+    # MESSAGE
+    # ─────────────────────────────────────────────────────────
     def message(
         self,
-        x_j: torch.Tensor,
-        norm: torch.Tensor,
-    ) -> torch.Tensor:
-
-        """
-        x_j:
-            Neighbor node features
-            Shape: (E, out_channels)
-
-        norm:
-            Edge normalization coefficients
-            Shape: (E,)
-        """
+        x_j,
+        norm
+    ):
 
         return norm.unsqueeze(-1) * x_j
 
-    # ── UPDATE FUNCTION ──────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
+    # UPDATE
+    # ─────────────────────────────────────────────────────────
     def update(
         self,
-        aggr_out: torch.Tensor
-    ) -> torch.Tensor:
-
-        """
-        aggr_out:
-            Aggregated messages
-            Shape: (N, out_channels)
-        """
+        aggr_out
+    ):
 
         return aggr_out
 
@@ -228,21 +170,19 @@ class TGCNGraphConv(MessagePassing):
             f"out={self.out_channels})"
         )
 
+
+# ─────────────────────────────────────────────────────────────
+# TWO-LAYER GCN MODEL
+# ─────────────────────────────────────────────────────────────
+
 class GCN(nn.Module):
-
-    """
-    Simple 2-layer GCN baseline.
-
-    Architecture:
-        GCN → ReLU → Dropout → GCN
-    """
 
     def __init__(
         self,
-        in_channels: int,
-        hidden_dim: int,
-        out_channels: int,
-        dropout: float = 0.2,
+        in_channels,
+        hidden_dim,
+        out_channels,
+        dropout=0.2
     ):
 
         super().__init__()
@@ -261,12 +201,12 @@ class GCN(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,
-        edge_index: torch.Tensor,
-        edge_weight: torch.Tensor = None,
-    ) -> torch.Tensor:
+        x,
+        edge_index,
+        edge_weight=None
+    ):
 
-        # Layer 1
+        # First layer
         x = self.conv1(
             x,
             edge_index,
@@ -281,7 +221,7 @@ class GCN(nn.Module):
             training=self.training
         )
 
-        # Layer 2
+        # Second layer
         x = self.conv2(
             x,
             edge_index,
@@ -291,9 +231,13 @@ class GCN(nn.Module):
         return x
 
 
+# ─────────────────────────────────────────────────────────────
+# TOY GRAPH
+# ─────────────────────────────────────────────────────────────
+
 def build_toy_graph(
-    in_channels: int = 8
-) -> Data:
+    in_channels=8
+):
 
     """
     Toy graph topology:
@@ -312,12 +256,15 @@ def build_toy_graph(
     )
 
     # Undirected edges
-    edge_index = torch.tensor([
-        [0, 1,  1, 2,  0, 3,  2, 4,  3, 4],
-        [1, 0,  2, 1,  3, 0,  4, 2,  4, 3],
-    ], dtype=torch.long)
+    edge_index = torch.tensor(
+        [
+            [0, 1, 1, 2, 0, 3, 2, 4, 3, 4],
+            [1, 0, 2, 1, 3, 0, 4, 2, 4, 3],
+        ],
+        dtype=torch.long
+    )
 
-    # Simulated inverse-distance weights
+    # Example edge weights
     edge_weight = torch.tensor(
         [
             0.5, 0.5,
@@ -329,20 +276,27 @@ def build_toy_graph(
         dtype=torch.float
     )
 
-    # AQI target
+    # Dummy targets
     y = torch.rand(5, 1)
 
-    return Data(
+    data = Data(
         x=x,
         edge_index=edge_index,
         edge_attr=edge_weight,
         y=y
     )
 
+    return data
+
+
+# ─────────────────────────────────────────────────────────────
+# SHAPE CHECKER
+# ─────────────────────────────────────────────────────────────
+
 def assert_shape(
-    tensor: torch.Tensor,
-    expected: tuple,
-    label: str,
+    tensor,
+    expected,
+    label
 ):
 
     actual = tuple(tensor.shape)
@@ -350,8 +304,7 @@ def assert_shape(
     if actual == expected:
 
         print(
-            f"[PASS ✓] {label}: "
-            f"{actual}"
+            f"[PASS ✓] {label}: {actual}"
         )
 
     else:
@@ -367,9 +320,11 @@ def assert_shape(
         )
 
 
-def print_adjacency(
-    data: Data
-):
+# ─────────────────────────────────────────────────────────────
+# PRINT ADJACENCY
+# ─────────────────────────────────────────────────────────────
+
+def print_adjacency(data):
 
     n = data.num_nodes
 
@@ -387,14 +342,17 @@ def print_adjacency(
 
     print("\nWeighted Adjacency Matrix:\n")
 
-    print("      " + " ".join(
-        [f"{i:>6}" for i in range(n)]
-    ))
+    print(
+        "      "
+        + " ".join(
+            [f"{i:>6}" for i in range(n)]
+        )
+    )
 
     for i in range(n):
 
         row = " ".join(
-            [f"{A[i,j]:6.2f}" for j in range(n)]
+            [f"{A[i, j]:6.2f}" for j in range(n)]
         )
 
         print(f"{i:>3} | {row}")
@@ -404,6 +362,10 @@ def print_adjacency(
     print("  |         |")
     print("  3 ------- 4")
 
+
+# ─────────────────────────────────────────────────────────────
+# VERIFY SHAPES
+# ─────────────────────────────────────────────────────────────
 
 def verify_shapes():
 
@@ -430,6 +392,10 @@ def verify_shapes():
     print(f"  edge_weight : {data.edge_attr.shape}")
     print(f"  target y    : {data.y.shape}")
 
+    # ─────────────────────────────────────────────────────────
+    # SINGLE GCN LAYER
+    # ─────────────────────────────────────────────────────────
+
     single_conv = TGCNGraphConv(
         IN_CHANNELS,
         HIDDEN_DIM
@@ -446,6 +412,7 @@ def verify_shapes():
         )
 
     print("\nSingle GCN Layer:")
+
     print(
         f"  Output shape: "
         f"{out_single.shape}"
@@ -457,14 +424,18 @@ def verify_shapes():
         label="Single GCN output"
     )
 
-       model = GCN(
+    # ─────────────────────────────────────────────────────────
+    # FULL MODEL
+    # ─────────────────────────────────────────────────────────
+
+    model = GCN(
         in_channels=IN_CHANNELS,
         hidden_dim=HIDDEN_DIM,
         out_channels=OUT_CHANNELS,
-        dropout=0.2,
-        )
+        dropout=0.2
+    )
 
-       model.eval()
+    model.eval()
 
     total_params = sum(
         p.numel()
@@ -485,6 +456,7 @@ def verify_shapes():
         )
 
     print("\nFull Model Output:")
+
     print(
         f"  Output shape: "
         f"{out_full.shape}"
@@ -495,6 +467,11 @@ def verify_shapes():
         expected=(N_NODES, OUT_CHANNELS),
         label="Full GCN output"
     )
+
+    # ─────────────────────────────────────────────────────────
+    # TEST WITHOUT EDGE WEIGHTS
+    # ─────────────────────────────────────────────────────────
+
     with torch.no_grad():
 
         out_no_weight = model(
@@ -504,6 +481,7 @@ def verify_shapes():
         )
 
     print("\nWithout Edge Weights:")
+
     print(
         f"  Output shape: "
         f"{out_no_weight.shape}"
@@ -514,6 +492,10 @@ def verify_shapes():
         expected=(N_NODES, OUT_CHANNELS),
         label="No-edge-weight output"
     )
+
+    # ─────────────────────────────────────────────────────────
+    # LOSS TEST
+    # ─────────────────────────────────────────────────────────
 
     model.train()
 
@@ -542,10 +524,29 @@ def verify_shapes():
     optimizer.step()
 
     print("\nLoss Computation:")
-    print(f"  Prediction shape: {pred.shape}")
-    print(f"  Target shape    : {data.y.shape}")
-    print(f"  Loss            : {loss.item():.6f}")
-    print("  Backpropagation : PASS ✓")
+
+    print(
+        f"  Prediction shape: "
+        f"{pred.shape}"
+    )
+
+    print(
+        f"  Target shape    : "
+        f"{data.y.shape}"
+    )
+
+    print(
+        f"  Loss            : "
+        f"{loss.item():.6f}"
+    )
+
+    print(
+        "  Backpropagation : PASS ✓"
+    )
+
+    # ─────────────────────────────────────────────────────────
+    # T-GCN PREPARATION
+    # ─────────────────────────────────────────────────────────
 
     T = 24
 
@@ -594,9 +595,19 @@ def verify_shapes():
     )
 
     print("\n" + "=" * 60)
+
     print("ALL CHECKS PASSED ✓")
-    print("GCN READY FOR T-GCN INTEGRATION")
+
+    print(
+        "GCN READY FOR T-GCN INTEGRATION"
+    )
+
     print("=" * 60)
+
+
+# ─────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
 
