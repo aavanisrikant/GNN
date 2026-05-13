@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 
-from tgcn_cell import TGCNCell
-
+from gru_component import TGCNCell
 
 class TGCN(nn.Module):
 
