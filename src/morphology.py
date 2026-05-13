@@ -50,28 +50,38 @@ except Exception:
         which_result=1
     )
 
-MUMBAI_GEOM = unary_union(MUMBAI_GDF.geometry)
+# Merge polygons safely
+MUMBAI_GEOM = unary_union(
+    MUMBAI_GDF.geometry
+)
 
-raw_boundary = MUMBAI_GEOM.boundary
+# SAFER coastline extraction
+if MUMBAI_GEOM.geom_type == "Polygon":
 
-print(f"Coastline geometry type: {raw_boundary.geom_type}")
+    MUMBAI_COASTLINE = (
+        MUMBAI_GEOM.exterior
+    )
 
-if raw_boundary.geom_type == "GeometryCollection":
+elif MUMBAI_GEOM.geom_type == "MultiPolygon":
 
-    line_parts = [
-        g for g in raw_boundary.geoms
-        if isinstance(g, (LineString, MultiLineString))
-    ]
-
-    MUMBAI_COASTLINE = unary_union(line_parts)
-
-    print(
-        f"Extracted {len(line_parts)} line geometries."
+    MUMBAI_COASTLINE = unary_union(
+        [
+            poly.exterior
+            for poly in MUMBAI_GEOM.geoms
+        ]
     )
 
 else:
 
-    MUMBAI_COASTLINE = raw_boundary
+    raise ValueError(
+        f"Unexpected geometry type: "
+        f"{MUMBAI_GEOM.geom_type}"
+    )
+
+print(
+    f"Coastline geometry type: "
+    f"{MUMBAI_COASTLINE.geom_type}"
+)
 
 print("Mumbai boundary loaded successfully.")
 
