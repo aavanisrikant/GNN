@@ -2,45 +2,79 @@ import pandas as pd
 import numpy as np
 import osmnx as ox
 import geopandas as gpd
-from shapely.geometry import Point
-from shapely.ops import nearest_points
+from shapely.geometry import Point, MultiLineString, LineString
+from shapely.ops import nearest_points, unary_union
 from pathlib import Path
 import json
 import warnings
 import os
+import time
 
 warnings.filterwarnings("ignore")
 
-# ── CONFIG ────────────────────────────────────────────────────────────────
-RADIUS_M    = 2000
+RADIUS_M = 2000
 
 COORDS_PATH = "data/processed/station_coords.csv"
 
-CACHE_DIR   = "data/morphology_cache"
+CACHE_DIR = "data/morphology_cache"
 
-SAVE_CSV    = "data/processed/node_static_features.csv"
-SAVE_NPY    = "data/processed/node_static_features.npy"
+SAVE_CSV = "data/processed/node_static_features.csv"
+SAVE_NPY = "data/processed/node_static_features.npy"
 
-UTM_CRS     = "EPSG:32643"   # Mumbai UTM projection
+UTM_CRS = "EPSG:32644"
 
 Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 Path("data/processed").mkdir(parents=True, exist_ok=True)
 
-# ── OSMNX SETTINGS ────────────────────────────────────────────────────────
-ox.settings.log_console  = False
-ox.settings.use_cache    = True
+#  OSMNX 
+ox.settings.log_console = False
+ox.settings.use_cache = True
 ox.settings.cache_folder = "osm_cache"
-ox.settings.timeout      = 180
+ox.settings.timeout = 180
 
-# ── LOAD MUMBAI BOUNDARY ONCE (IMPORTANT SPEED FIX) ──────────────────────
 print("Loading Mumbai boundary...")
-MUMBAI_GDF = ox.geocode_to_gdf(
-    "Mumbai, Maharashtra, India"
-)
 
-MUMBAI_COASTLINE = MUMBAI_GDF.geometry.iloc[0].boundary
+try:
 
-# ── ROAD TYPE DEFINITIONS ────────────────────────────────────────────────
+    MUMBAI_GDF = ox.geocode_to_gdf(
+        {
+            "city": "Mumbai",
+            "country": "India"
+        }
+    )
+
+except Exception:
+
+    MUMBAI_GDF = ox.geocode_to_gdf(
+        "Mumbai, India",
+        which_result=1
+    )
+
+MUMBAI_GEOM = unary_union(MUMBAI_GDF.geometry)
+
+raw_boundary = MUMBAI_GEOM.boundary
+
+print(f"Coastline geometry type: {raw_boundary.geom_type}")
+
+if raw_boundary.geom_type == "GeometryCollection":
+
+    line_parts = [
+        g for g in raw_boundary.geoms
+        if isinstance(g, (LineString, MultiLineString))
+    ]
+
+    MUMBAI_COASTLINE = unary_union(line_parts)
+
+    print(
+        f"Extracted {len(line_parts)} line geometries."
+    )
+
+else:
+
+    MUMBAI_COASTLINE = raw_boundary
+
+print("Mumbai boundary loaded successfully.")
+
 ARTERIAL_TYPES = {
     "motorway",
     "trunk",
@@ -52,8 +86,8 @@ ARTERIAL_TYPES = {
     "secondary_link",
 }
 
-# ── LANDUSE GROUPINGS ─────────────────────────────────────────────────────
 LANDUSE_CATEGORIES = {
+
     "industrial": {
         "industrial",
         "port",
@@ -78,178 +112,307 @@ LANDUSE_CATEGORIES = {
     },
 }
 
-# ── HELPERS ───────────────────────────────────────────────────────────────
+STATIC_COLS = [
+    "road_density",
+    "arterial_fraction",
+    "industrial_fraction",
+    "residential_fraction",
+    "green_fraction",
+    "building_density",
+    "coastline_distance",
+]
+
 def is_arterial(hw):
 
+    if hw is None:
+        return False
+
+    if isinstance(hw, float) and np.isnan(hw):
+        return False
+
     if isinstance(hw, list):
-        return any(h in ARTERIAL_TYPES for h in hw)
+
+        return any(
+            h in ARTERIAL_TYPES
+            for h in hw
+            if isinstance(h, str)
+        )
 
     return hw in ARTERIAL_TYPES
 
 
-# ── ROAD FEATURES ─────────────────────────────────────────────────────────
-def get_road_features(lat, lon):
-
-    G = ox.graph_from_point(
-        (lat, lon),
-        dist=RADIUS_M,
-        network_type="drive"
-    )
-
-    edges = ox.graph_to_gdfs(
-        G,
-        nodes=False
-    )
-
-    edges_proj = edges.to_crs(UTM_CRS)
-
-    total_length = edges_proj["length"].sum()
-
-    buffer_area = np.pi * (RADIUS_M ** 2)
-
-    road_density = total_length / buffer_area
-
-    art_mask = edges_proj["highway"].apply(is_arterial)
-
-    arterial_length = edges_proj.loc[
-        art_mask,
-        "length"
-    ].sum()
-
-    arterial_fraction = (
-        arterial_length / total_length
-        if total_length > 0 else 0.0
-    )
-
-    return (
-        float(road_density),
-        float(arterial_fraction)
-    )
-
-
-# ── LANDUSE FEATURES ──────────────────────────────────────────────────────
-def get_landuse_features(lat, lon):
+def safe_buffer_fix(gdf):
 
     try:
-        gdf = ox.features_from_point(
-            (lat, lon),
-            tags={"landuse": True},
-            dist=RADIUS_M
+
+        gdf = gdf.copy()
+
+        gdf["geometry"] = (
+            gdf.geometry.buffer(0)
         )
 
     except Exception:
-        return {
-            k + "_fraction": 0.0
-            for k in LANDUSE_CATEGORIES
-        }
+        pass
 
-    if gdf.empty:
-        return {
-            k + "_fraction": 0.0
-            for k in LANDUSE_CATEGORIES
-        }
+    return gdf
 
-    # Project station point
-    point_proj = gpd.GeoSeries(
-        [Point(lon, lat)],
-        crs="EPSG:4326"
-    ).to_crs(UTM_CRS).iloc[0]
 
-    # Create circular buffer
-    buffer = point_proj.buffer(RADIUS_M)
+def format_float(val, precision=5):
 
-    # Project geometries
-    gdf_proj = gdf.to_crs(UTM_CRS)
+    if val is None:
+        return "nan"
 
-    # Remove invalid geometries
-    gdf_proj = gdf_proj[
-        gdf_proj.geometry.notna()
-    ]
+    if isinstance(val, float) and np.isnan(val):
+        return "nan"
 
-    # Keep only geometries intersecting buffer
-    gdf_proj = gdf_proj[
-        gdf_proj.geometry.intersects(buffer)
-    ].copy()
+    return f"{val:.{precision}f}"
 
-    # Clip area
-    gdf_proj["clipped_area"] = (
-        gdf_proj.geometry
-        .intersection(buffer)
-        .area
-    )
 
-    total_area = buffer.area
+def get_road_features(lat, lon):
 
-    results = {}
+    for attempt in range(3):
 
-    for category, tags in LANDUSE_CATEGORIES.items():
+        try:
 
-        mask = gdf_proj["landuse"].isin(tags)
+            G = ox.graph_from_point(
+                (lat, lon),
+                dist=RADIUS_M,
+                network_type="drive"
+            )
 
-        area = gdf_proj.loc[
-            mask,
-            "clipped_area"
-        ].sum()
+            edges = ox.graph_to_gdfs(
+                G,
+                nodes=False
+            )
 
-        results[f"{category}_fraction"] = (
-            float(area / total_area)
+            edges_proj = edges.to_crs(UTM_CRS)
+
+            # safer metric length
+            total_length = (
+                edges_proj.geometry.length.sum()
+            )
+
+            buffer_area = (
+                np.pi * (RADIUS_M ** 2)
+            )
+
+            road_density = (
+                total_length / buffer_area
+            )
+
+            art_mask = (
+                edges_proj["highway"]
+                .apply(is_arterial)
+            )
+
+            arterial_length = (
+                edges_proj.loc[art_mask]
+                .geometry.length.sum()
+            )
+
+            arterial_fraction = (
+                arterial_length / total_length
+                if total_length > 0 else 0.0
+            )
+
+            return (
+                float(road_density),
+                float(arterial_fraction)
+            )
+
+        except Exception as e:
+
+            print(
+                f"    Road retry "
+                f"{attempt+1}/3 failed: {e}"
+            )
+
+            time.sleep(5)
+
+    return np.nan, np.nan
+
+def get_landuse_features(lat, lon):
+
+    fallback = {
+        k + "_fraction": 0.0
+        for k in LANDUSE_CATEGORIES
+    }
+
+    gdf = None
+
+    for attempt in range(3):
+
+        try:
+
+            gdf = ox.features_from_point(
+                (lat, lon),
+                tags={"landuse": True},
+                dist=RADIUS_M
+            )
+
+            break
+
+        except Exception as e:
+
+            print(
+                f"    Landuse retry "
+                f"{attempt+1}/3 failed: {e}"
+            )
+
+            time.sleep(5)
+
+    if gdf is None or gdf.empty:
+        return fallback
+
+    try:
+
+        point_proj = gpd.GeoSeries(
+            [Point(lon, lat)],
+            crs="EPSG:4326"
+        ).to_crs(UTM_CRS).iloc[0]
+
+        buffer = point_proj.buffer(
+            RADIUS_M
         )
 
-    return results
+        gdf_proj = gdf.to_crs(UTM_CRS)
+
+        gdf_proj = gdf_proj[
+            gdf_proj.geometry.notna()
+        ]
+
+        gdf_proj = safe_buffer_fix(
+            gdf_proj
+        )
+
+        gdf_proj = gdf_proj[
+            gdf_proj.geometry.intersects(buffer)
+        ].copy()
+
+        if gdf_proj.empty:
+            return fallback
+
+        gdf_proj["clipped_area"] = (
+            gdf_proj.geometry
+            .intersection(buffer)
+            .area
+        )
+
+        total_area = buffer.area
+
+        results = {}
+
+        for category, tags in LANDUSE_CATEGORIES.items():
+
+            mask = (
+                gdf_proj["landuse"]
+                .isin(tags)
+            )
+
+            area = (
+                gdf_proj.loc[
+                    mask,
+                    "clipped_area"
+                ].sum()
+            )
+
+            results[
+                f"{category}_fraction"
+            ] = float(area / total_area)
+
+        return results
+
+    except Exception as e:
+
+        print(
+            f"    Landuse processing failed: {e}"
+        )
+
+        return fallback
 
 
 # ── BUILDING DENSITY ──────────────────────────────────────────────────────
 def get_building_density(lat, lon):
 
+    gdf = None
+
+    for attempt in range(3):
+
+        try:
+
+            gdf = ox.features_from_point(
+                (lat, lon),
+                tags={"building": True},
+                dist=RADIUS_M
+            )
+
+            break
+
+        except Exception as e:
+
+            print(
+                f"    Building retry "
+                f"{attempt+1}/3 failed: {e}"
+            )
+
+            time.sleep(5)
+
+    if gdf is None or gdf.empty:
+        return 0.0
+
     try:
-        gdf = ox.features_from_point(
-            (lat, lon),
-            tags={"building": True},
-            dist=RADIUS_M
+
+        point_proj = gpd.GeoSeries(
+            [Point(lon, lat)],
+            crs="EPSG:4326"
+        ).to_crs(UTM_CRS).iloc[0]
+
+        buffer = point_proj.buffer(
+            RADIUS_M
         )
 
-    except Exception:
-        return 0.0
+        gdf_proj = gdf.to_crs(UTM_CRS)
 
-    if gdf.empty:
-        return 0.0
+        gdf_proj = gdf_proj[
+            gdf_proj.geometry.notna()
+        ]
 
-    point_proj = gpd.GeoSeries(
-        [Point(lon, lat)],
-        crs="EPSG:4326"
-    ).to_crs(UTM_CRS).iloc[0]
+        # safer future-proof geom filtering
+        gdf_proj = gdf_proj[
+            gdf_proj.geom_type.isin(
+                ["Polygon", "MultiPolygon"]
+            )
+        ]
 
-    buffer = point_proj.buffer(RADIUS_M)
-
-    gdf_proj = gdf.to_crs(UTM_CRS)
-
-    gdf_proj = gdf_proj[
-        gdf_proj.geometry.notna()
-    ]
-
-    gdf_proj = gdf_proj[
-        gdf_proj.geometry.type.isin(
-            ["Polygon", "MultiPolygon"]
+        gdf_proj = safe_buffer_fix(
+            gdf_proj
         )
-    ]
 
-    gdf_proj = gdf_proj[
-        gdf_proj.geometry.intersects(buffer)
-    ].copy()
+        gdf_proj = gdf_proj[
+            gdf_proj.geometry.intersects(buffer)
+        ].copy()
 
-    if gdf_proj.empty:
+        if gdf_proj.empty:
+            return 0.0
+
+        footprint_area = (
+            gdf_proj.geometry
+            .intersection(buffer)
+            .area
+            .sum()
+        )
+
+        return float(
+            footprint_area / buffer.area
+        )
+
+    except Exception as e:
+
+        print(
+            f"    Building processing failed: {e}"
+        )
+
         return 0.0
-
-    footprint_area = (
-        gdf_proj.geometry
-        .intersection(buffer)
-        .area
-        .sum()
-    )
-
-    return float(
-        footprint_area / buffer.area
-    )
 
 
 # ── COASTLINE DISTANCE ────────────────────────────────────────────────────
@@ -290,8 +453,8 @@ print(f"\nProcessing {len(df)} stations...\n")
 for idx, row in df.iterrows():
 
     station = row["station"]
-    lat     = row["lat"]
-    lon     = row["lon"]
+    lat = row["lat"]
+    lon = row["lon"]
 
     safe_id = (
         station
@@ -300,11 +463,15 @@ for idx, row in df.iterrows():
         .replace(".", "")
     )
 
-    cache_file = f"{CACHE_DIR}/{safe_id}.json"
+    cache_file = (
+        f"{CACHE_DIR}/{safe_id}.json"
+    )
 
-    print(f"[{idx+1}/{len(df)}] {station}")
+    print(
+        f"[{idx+1}/{len(df)}] {station}"
+    )
 
-    # ── CACHE HIT ─────────────────────────────────
+    # ── CACHE HIT ─────────────────────────────────────────────────────────
     if os.path.exists(cache_file):
 
         print("  [CACHE HIT]")
@@ -319,19 +486,26 @@ for idx, row in df.iterrows():
         "station": station
     }
 
-    # ── ROAD FEATURES ─────────────────────────────
+    # ── ROAD FEATURES ─────────────────────────────────────────────────────
     try:
 
         road_density, arterial_fraction = (
             get_road_features(lat, lon)
         )
 
-        feats["road_density"] = road_density
-        feats["arterial_fraction"] = arterial_fraction
+        feats["road_density"] = (
+            road_density
+        )
+
+        feats["arterial_fraction"] = (
+            arterial_fraction
+        )
 
         print(
-            f"  road_density={road_density:.5f} "
-            f"arterial_fraction={arterial_fraction:.3f}"
+            f"  road_density="
+            f"{format_float(road_density, 5)} "
+            f"arterial_fraction="
+            f"{format_float(arterial_fraction, 3)}"
         )
 
     except Exception as e:
@@ -341,17 +515,23 @@ for idx, row in df.iterrows():
         feats["road_density"] = np.nan
         feats["arterial_fraction"] = np.nan
 
-    # ── LANDUSE FEATURES ──────────────────────────
+    # ── LANDUSE FEATURES ──────────────────────────────────────────────────
     try:
 
-        lu = get_landuse_features(lat, lon)
+        lu = get_landuse_features(
+            lat,
+            lon
+        )
 
         feats.update(lu)
 
         print(
-            f"  industrial={lu['industrial_fraction']:.3f} "
-            f"residential={lu['residential_fraction']:.3f} "
-            f"green={lu['green_fraction']:.3f}"
+            f"  industrial="
+            f"{lu['industrial_fraction']:.3f} "
+            f"residential="
+            f"{lu['residential_fraction']:.3f} "
+            f"green="
+            f"{lu['green_fraction']:.3f}"
         )
 
     except Exception as e:
@@ -362,10 +542,13 @@ for idx, row in df.iterrows():
         feats["residential_fraction"] = np.nan
         feats["green_fraction"] = np.nan
 
-    # ── BUILDING DENSITY ──────────────────────────
+    # ── BUILDING DENSITY ──────────────────────────────────────────────────
     try:
 
-        bd = get_building_density(lat, lon)
+        bd = get_building_density(
+            lat,
+            lon
+        )
 
         feats["building_density"] = bd
 
@@ -375,44 +558,47 @@ for idx, row in df.iterrows():
 
     except Exception as e:
 
-        print(f"  BUILDINGS FAILED: {e}")
+        print(
+            f"  BUILDINGS FAILED: {e}"
+        )
 
         feats["building_density"] = np.nan
 
-    # ── COASTLINE DISTANCE ────────────────────────
+    # ── COASTLINE DISTANCE ────────────────────────────────────────────────
     try:
 
-        cd = get_coastline_distance(lat, lon)
+        cd = get_coastline_distance(
+            lat,
+            lon
+        )
 
         feats["coastline_distance"] = cd
 
         print(
-            f"  coastline_distance={cd:.2f} km"
+            f"  coastline_distance="
+            f"{cd:.2f} km"
         )
 
     except Exception as e:
 
-        print(f"  COASTLINE FAILED: {e}")
+        print(
+            f"  COASTLINE FAILED: {e}"
+        )
 
         feats["coastline_distance"] = np.nan
 
-    # ── SAVE CACHE ────────────────────────────────
+    # ── SAVE CACHE ────────────────────────────────────────────────────────
     with open(cache_file, "w") as f:
-        json.dump(feats, f, indent=2)
+
+        json.dump(
+            feats,
+            f,
+            indent=2
+        )
 
     features.append(feats)
 
 # ── BUILD DATAFRAME ───────────────────────────────────────────────────────
-STATIC_COLS = [
-    "road_density",
-    "arterial_fraction",
-    "industrial_fraction",
-    "residential_fraction",
-    "green_fraction",
-    "building_density",
-    "coastline_distance",
-]
-
 feat_df = pd.DataFrame(features)
 
 # ── FILL MISSING VALUES ──────────────────────────────────────────────────
@@ -420,13 +606,17 @@ for col in STATIC_COLS:
 
     if col in feat_df.columns:
 
-        median_val = feat_df[col].median()
+        median_val = (
+            feat_df[col].median()
+        )
 
-        feat_df[col] = feat_df[col].fillna(
-            median_val
+        feat_df[col] = (
+            feat_df[col]
+            .fillna(median_val)
         )
 
     else:
+
         feat_df[col] = 0.0
 
 # ── SAVE RAW CSV ─────────────────────────────────────────────────────────
@@ -438,6 +628,11 @@ feat_df.to_csv(
 print(f"\nSaved CSV → {SAVE_CSV}")
 
 # ── NORMALISE FEATURES ───────────────────────────────────────────────────
+# NOTE:
+# For final experiments:
+# fit min/max ONLY on training nodes
+# to avoid train-test leakage.
+
 X_static = feat_df[
     STATIC_COLS
 ].values.astype(np.float32)
