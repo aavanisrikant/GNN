@@ -457,14 +457,14 @@ def verify_shapes():
         label="Single GCN output"
     )
 
-      model = GCN(
+       model = GCN(
         in_channels=IN_CHANNELS,
         hidden_dim=HIDDEN_DIM,
         out_channels=OUT_CHANNELS,
         dropout=0.2,
-    )
+        )
 
-    model.eval()
+       model.eval()
 
     total_params = sum(
         p.numel()
