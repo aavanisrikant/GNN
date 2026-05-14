@@ -10,9 +10,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from tgcn_cell import TGCNCell      # noqa: F401
+from gru_component import TGCNCell
 from tgcn_model import TGCN, build_toy_graph
-from train import train
+from training_loop import train
 
 SEED = 42
 
