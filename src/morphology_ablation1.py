@@ -10,9 +10,16 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from gru_component import TGCNCell
+# IMPORTANT:
+# these filenames must match your actual files
+from gru_component import TGCNCell      # noqa: F401
 from tgcn_model import TGCN, build_toy_graph
 from training_loop import train
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REPRODUCIBILITY
+# ─────────────────────────────────────────────────────────────────────────────
 
 SEED = 42
 
@@ -22,6 +29,12 @@ torch.manual_seed(SEED)
 
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(SEED)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FEATURE DEFINITIONS
+# VERIFY THESE MATCH YOUR DATASET PIPELINE
+# ─────────────────────────────────────────────────────────────────────────────
 
 FEATURE_NAMES = [
     "aqi",
@@ -34,39 +47,82 @@ FEATURE_NAMES = [
     "coastline_distance",
 ]
 
+# Experiment A
 AQI_COLS = [0]
 
+# Experiment B
 ROAD_COLS = [
     0,  # AQI
     1,  # road_density
     2,  # arterial_fraction
 ]
 
+# Experiment C
 ALL_COLS = list(range(len(FEATURE_NAMES)))
 
 EXPERIMENTS = {
+
     "A_aqi_only": {
-        "label": "AQI only (no morphology)",
-        "cols": AQI_COLS,
-        "marker": "○",
+
+        "label":
+            "AQI only (no morphology)",
+
+        "cols":
+            AQI_COLS,
+
+        "marker":
+            "○",
     },
 
     "B_road": {
-        "label": "AQI + road_density + arterial_fraction",
-        "cols": ROAD_COLS,
-        "marker": "◑",
+
+        "label":
+            "AQI + road_density + arterial_fraction",
+
+        "cols":
+            ROAD_COLS,
+
+        "marker":
+            "◑",
     },
 
     "C_all": {
-        "label": "AQI + all morphology features",
-        "cols": ALL_COLS,
-        "marker": "●",
+
+        "label":
+            "AQI + all morphology features",
+
+        "cols":
+            ALL_COLS,
+
+        "marker":
+            "●",
     },
 }
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FEATURE SELECTION
+# ─────────────────────────────────────────────────────────────────────────────
+
 def select_features(X, cols):
 
+    """
+    Select feature subset.
+
+    Input:
+        (B,T,N,F)
+
+    Output:
+        (B,T,N,len(cols))
+    """
+
     return X[..., cols]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DATALOADERS
+# ─────────────────────────────────────────────────────────────────────────────
+
 def make_loaders(
     X,
     y,
@@ -82,6 +138,11 @@ def make_loaders(
         shuffle=shuffle,
         drop_last=shuffle,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BUILD MODEL
+# ─────────────────────────────────────────────────────────────────────────────
 
 def build_model(
     n_features,
@@ -105,9 +166,14 @@ def build_model(
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# NaN / INF CHECKS
+# ─────────────────────────────────────────────────────────────────────────────
+
 def check_nan_inf(name, tensor):
 
     n_nan = torch.isnan(tensor).sum().item()
+
     n_inf = torch.isinf(tensor).sum().item()
 
     if n_nan > 0 or n_inf > 0:
@@ -123,6 +189,10 @@ def check_nan_inf(name, tensor):
         f"no NaN / Inf"
     )
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# METRICS
+# ─────────────────────────────────────────────────────────────────────────────
 
 def evaluate_metrics(
     model,
@@ -148,17 +218,32 @@ def evaluate_metrics(
         for x, y in loader:
 
             x = x.to(device)
+
             y = y.to(device)
 
             preds = model(x)
 
-            mae = mae_criterion(preds, y)
-            mse = mse_criterion(preds, y)
+            mae = mae_criterion(
+                preds,
+                y,
+            )
+
+            mse = mse_criterion(
+                preds,
+                y,
+            )
 
             batch_size = x.size(0)
 
-            mae_total += mae.item() * batch_size
-            mse_total += mse.item() * batch_size
+            mae_total += (
+                mae.item()
+                * batch_size
+            )
+
+            mse_total += (
+                mse.item()
+                * batch_size
+            )
 
             count += batch_size
 
@@ -170,15 +255,26 @@ def evaluate_metrics(
                 y.cpu().numpy()
             )
 
-    preds_all = np.concatenate(preds_all)
-    targets_all = np.concatenate(targets_all)
+    preds_all = np.concatenate(
+        preds_all,
+        axis=0,
+    )
+
+    targets_all = np.concatenate(
+        targets_all,
+        axis=0,
+    )
 
     rmse = np.sqrt(
         np.mean(
-            (preds_all - targets_all) ** 2
+            (
+                preds_all
+                - targets_all
+            ) ** 2
         )
     )
 
+    # Avoid divide-by-zero
     mask = targets_all > 1.0
 
     if mask.sum() > 0:
@@ -198,7 +294,10 @@ def evaluate_metrics(
         mape = np.nan
 
     ss_res = np.sum(
-        (targets_all - preds_all) ** 2
+        (
+            targets_all
+            - preds_all
+        ) ** 2
     )
 
     ss_tot = np.sum(
@@ -217,12 +316,27 @@ def evaluate_metrics(
         r2 = 0.0
 
     return {
-        "mae": mae_total / count,
-        "mse": mse_total / count,
-        "rmse": rmse,
-        "mape": mape,
-        "r2": r2,
+
+        "mae":
+            mae_total / count,
+
+        "mse":
+            mse_total / count,
+
+        "rmse":
+            rmse,
+
+        "mape":
+            mape,
+
+        "r2":
+            r2,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RESULTS TABLE
+# ─────────────────────────────────────────────────────────────────────────────
 
 def print_results_table(
     results,
@@ -230,6 +344,7 @@ def print_results_table(
 ):
 
     print()
+
     print("═" * 78)
     print("DAY 28 — MORPHOLOGY ABLATION RESULTS")
     print("═" * 78)
@@ -258,6 +373,7 @@ def print_results_table(
         else:
 
             delta = mae - mae_A
+
             delta_str = f"{delta:+.4f}"
 
         print(
@@ -278,6 +394,10 @@ def print_results_table(
     print("═" * 78)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# INTERPRETATION
+# ─────────────────────────────────────────────────────────────────────────────
+
 def interpret_results(
     results,
     lstm_mae,
@@ -288,10 +408,11 @@ def interpret_results(
     mae_C = results["C_all"]["mae"]
 
     print()
+
     print("INTERPRETATION")
     print("─" * 78)
 
-    # Graph contribution
+    # Graph usefulness
     if mae_A < lstm_mae:
 
         print(
@@ -306,7 +427,7 @@ def interpret_results(
             "does not beat LSTM."
         )
 
-    # Road features
+    # Road morphology
     road_gain = mae_A - mae_B
 
     if road_gain > 0.001:
@@ -361,6 +482,74 @@ def interpret_results(
 
     print("─" * 78)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JSON SAFE CONVERSION
+# ─────────────────────────────────────────────────────────────────────────────
+
+def convert_json_safe(obj):
+
+    """
+    Convert numpy / torch values
+    into JSON-safe Python types.
+    """
+
+    # Dictionaries
+    if isinstance(obj, dict):
+
+        return {
+            k: convert_json_safe(v)
+            for k, v in obj.items()
+        }
+
+    # Lists
+    elif isinstance(obj, list):
+
+        return [
+            convert_json_safe(v)
+            for v in obj
+        ]
+
+    # Tuples
+    elif isinstance(obj, tuple):
+
+        return tuple(
+            convert_json_safe(v)
+            for v in obj
+        )
+
+    # NumPy ints
+    elif isinstance(obj, np.integer):
+
+        return int(obj)
+
+    # NumPy floats
+    elif isinstance(obj, np.floating):
+
+        return float(obj)
+
+    # NumPy arrays
+    elif isinstance(obj, np.ndarray):
+
+        return obj.tolist()
+
+    # Torch tensors
+    elif isinstance(obj, torch.Tensor):
+
+        return (
+            obj.detach()
+            .cpu()
+            .tolist()
+        )
+
+    # Native types
+    return obj
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SAVE RESULTS
+# ─────────────────────────────────────────────────────────────────────────────
+
 def save_results(
     results,
     out_dir,
@@ -374,7 +563,9 @@ def save_results(
         exist_ok=True,
     )
 
+    # ────────────────────────────────────────────────────────
     # CSV SUMMARY
+    # ────────────────────────────────────────────────────────
     csv_path = (
         out_dir
         / "day28_ablation_results.csv"
@@ -389,27 +580,60 @@ def save_results(
         r = results[key]
 
         rows.append({
-            "experiment": key,
-            "label": exp["label"],
-            "feature_cols": str(exp["cols"]),
-            "n_features": len(exp["cols"]),
-            "val_mae": round(r["mae"], 6),
-            "val_mse": round(r["mse"], 6),
-            "val_rmse": round(r["rmse"], 6),
-            "val_r2": round(r["r2"], 6),
-            "best_epoch": r["best_epoch"],
-            "training_sec": round(
-                r["training_sec"],
-                1,
-            ),
-            "n_params": r["n_params"],
-            "delta_vs_A": round(
-                r["mae"] - mae_A,
-                6,
-            ),
-            "beats_lstm": (
-                r["mae"] < lstm_mae
-            ),
+
+            "experiment":
+                str(key),
+
+            "label":
+                str(exp["label"]),
+
+            "feature_cols":
+                str(exp["cols"]),
+
+            "n_features":
+                int(len(exp["cols"])),
+
+            "val_mae":
+                float(round(r["mae"], 6)),
+
+            "val_mse":
+                float(round(r["mse"], 6)),
+
+            "val_rmse":
+                float(round(r["rmse"], 6)),
+
+            "val_mape":
+                (
+                    None
+                    if np.isnan(r["mape"])
+                    else float(round(r["mape"], 6))
+                ),
+
+            "val_r2":
+                float(round(r["r2"], 6)),
+
+            "best_epoch":
+                int(r["best_epoch"]),
+
+            "training_sec":
+                float(round(
+                    r["training_sec"],
+                    1,
+                )),
+
+            "n_params":
+                int(r["n_params"]),
+
+            "delta_vs_A":
+                float(round(
+                    r["mae"] - mae_A,
+                    6,
+                )),
+
+            "beats_lstm":
+                bool(
+                    r["mae"] < lstm_mae
+                ),
         })
 
     with open(
@@ -424,31 +648,53 @@ def save_results(
         )
 
         writer.writeheader()
+
         writer.writerows(rows)
 
+    # ────────────────────────────────────────────────────────
     # JSON SUMMARY
+    # ────────────────────────────────────────────────────────
     json_path = (
         out_dir
         / "day28_summary.json"
     )
 
     summary = {
-        "lstm_mae": lstm_mae,
-        "experiments": results,
+
+        "lstm_mae":
+            float(lstm_mae),
+
+        "experiments":
+            results,
     }
+
+    # Convert unsafe objects
+    safe_summary = convert_json_safe(
+        summary
+    )
 
     with open(json_path, "w") as f:
 
         json.dump(
-            summary,
+            safe_summary,
             f,
             indent=2,
         )
 
     print()
+
     print(
-        f"Saved results → {out_dir}"
+        f"Saved CSV  → {csv_path}"
     )
+
+    print(
+        f"Saved JSON → {json_path}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
 
 def main(args):
 
@@ -464,7 +710,9 @@ def main(args):
 
     print(f"Device: {device}")
 
-    
+    # ────────────────────────────────────────────────────────
+    # LOAD DATA
+    # ────────────────────────────────────────────────────────
     if args.X_train:
 
         print("\nLoading dataset...")
@@ -556,13 +804,27 @@ def main(args):
 
         print(f"  {i}: {name}")
 
-    # NaN checks
     print("\nNaN / Inf checks:")
 
-    check_nan_inf("X_train", X_train)
-    check_nan_inf("y_train", y_train)
-    check_nan_inf("X_val", X_val)
-    check_nan_inf("y_val", y_val)
+    check_nan_inf(
+        "X_train",
+        X_train,
+    )
+
+    check_nan_inf(
+        "y_train",
+        y_train,
+    )
+
+    check_nan_inf(
+        "X_val",
+        X_val,
+    )
+
+    check_nan_inf(
+        "y_val",
+        y_val,
+    )
 
     B, T, N, F = X_train.shape
 
@@ -597,7 +859,7 @@ def main(args):
     )
 
     # ────────────────────────────────────────────────────────
-    # EXPERIMENTS
+    # RUN EXPERIMENTS
     # ────────────────────────────────────────────────────────
     results = {}
 
@@ -711,17 +973,34 @@ def main(args):
         )
 
         results[key] = {
-            "mae": metrics["mae"],
-            "mse": metrics["mse"],
-            "rmse": metrics["rmse"],
-            "mape": metrics["mape"],
-            "r2": metrics["r2"],
-            "best_epoch": best_epoch,
-            "training_sec": elapsed,
-            "n_params": n_params,
+
+            "mae":
+                metrics["mae"],
+
+            "mse":
+                metrics["mse"],
+
+            "rmse":
+                metrics["rmse"],
+
+            "mape":
+                metrics["mape"],
+
+            "r2":
+                metrics["r2"],
+
+            "best_epoch":
+                best_epoch,
+
+            "training_sec":
+                elapsed,
+
+            "n_params":
+                n_params,
         }
 
         print()
+
         print(
             f"Final MAE : "
             f"{metrics['mae']:.4f}"
@@ -855,7 +1134,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Validate dataset args
+    # Dataset validation
     if args.X_train:
 
         required = [
