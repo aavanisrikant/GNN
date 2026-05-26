@@ -5,6 +5,17 @@ import pathlib
 import torch
 import torch.nn as nn
 
+from torch.utils.data import (
+    TensorDataset,
+    DataLoader,
+)
+
+# YOUR MODEL
+from tgcn_model import TGCN
+
+# REAL DATA
+from data_loader import REAL_DATA
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TRAINING LOOP
@@ -37,25 +48,6 @@ def train(
 
         val_loader:
             Validation DataLoader.
-
-        lr:
-            Adam learning rate.
-
-        max_epochs:
-            Maximum epochs.
-
-        patience:
-            Early stopping patience.
-
-        max_norm:
-            Gradient clipping threshold.
-
-        checkpoint_path:
-            Best model save path.
-
-        device:
-            torch.device.
-            Auto-detects if None.
 
     Returns:
         history dictionary.
@@ -106,7 +98,7 @@ def train(
         patience=5,
         min_lr=1e-6,
     )
- 
+
     # ────────────────────────────────────────────────────────────
     # HISTORY
     # ────────────────────────────────────────────────────────────
@@ -118,7 +110,7 @@ def train(
     }
 
     # ────────────────────────────────────────────────────────────
-    # EARLY STOPPING STATE
+    # EARLY STOPPING
     # ────────────────────────────────────────────────────────────
     best_val_loss = float("inf")
     best_epoch = 0
@@ -146,7 +138,7 @@ def train(
     print("─" * 70)
 
     # ────────────────────────────────────────────────────────────
-    # TRAINING LOOP
+    # EPOCH LOOP
     # ────────────────────────────────────────────────────────────
     for epoch in range(1, max_epochs + 1):
 
@@ -173,14 +165,13 @@ def train(
 
             loss = mse_loss(
                 preds,
-                y_batch
+                y_batch,
             )
 
             loss.backward()
 
             # ────────────────────────────────────────────────
             # GRADIENT CLIPPING
-            # IMPORTANT FOR RNN / GRU STABILITY
             # ────────────────────────────────────────────────
             nn.utils.clip_grad_norm_(
                 model.parameters(),
@@ -189,20 +180,12 @@ def train(
 
             optimizer.step()
 
-            # Weighted accumulation
             train_loss_sum += (
                 loss.item()
                 * batch_size
             )
 
             train_samples += batch_size
-
-        # Empty loader guard
-        if train_samples == 0:
-
-            raise ValueError(
-                "train_loader is empty"
-            )
 
         avg_train_loss = (
             train_loss_sum
@@ -231,15 +214,14 @@ def train(
 
                 mse = mse_loss(
                     preds,
-                    y_batch
+                    y_batch,
                 )
 
                 mae = mae_loss(
                     preds,
-                    y_batch
+                    y_batch,
                 )
 
-                # Weighted accumulation
                 val_loss_sum += (
                     mse.item()
                     * batch_size
@@ -252,13 +234,6 @@ def train(
 
                 val_samples += batch_size
 
-        # Empty loader guard
-        if val_samples == 0:
-
-            raise ValueError(
-                "val_loader is empty"
-            )
-
         avg_val_loss = (
             val_loss_sum
             / val_samples
@@ -270,14 +245,15 @@ def train(
         )
 
         current_lr = (
-            optimizer
-            .param_groups[0]["lr"]
+            optimizer.param_groups[0]["lr"]
         )
 
-        elapsed = time.time() - t0
+        elapsed = (
+            time.time() - t0
+        )
 
         # ========================================================
-        # LOG HISTORY
+        # SAVE HISTORY
         # ========================================================
         history["train_loss"].append(
             avg_train_loss
@@ -316,12 +292,14 @@ def train(
             torch.save(
                 {
                     "epoch": epoch,
-                    "model_state_dict": best_weights,
+                    "model_state_dict":
+                        best_weights,
                     "optimizer_state_dict":
                         optimizer.state_dict(),
-                    "val_loss": avg_val_loss,
-                    "val_mae": avg_val_mae,
-                    "lr": current_lr,
+                    "val_loss":
+                        avg_val_loss,
+                    "val_mae":
+                        avg_val_mae,
                 },
                 checkpoint_path,
             )
@@ -331,7 +309,7 @@ def train(
             epochs_no_improve += 1
 
         # ========================================================
-        # PRINT EPOCH LOG
+        # PRINT LOG
         # ========================================================
         marker = " ✓" if improved else ""
 
@@ -358,10 +336,8 @@ def train(
             print()
 
             print(
-                f"Early stopping triggered "
-                f"at epoch {epoch} "
-                f"(no improvement for "
-                f"{patience} epochs)."
+                f"Early stopping at epoch "
+                f"{epoch}"
             )
 
             break
@@ -401,50 +377,77 @@ def train(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SMOKE TEST
+# REAL DATA TRAINING TEST
 # ─────────────────────────────────────────────────────────────────────────────
 
-def smoke_test():
-
-    from torch.utils.data import (
-        TensorDataset,
-        DataLoader,
-    )
-
-    # IMPORTANT:
-    # use YOUR actual filename
-    from gru_component import TGCNCell
-    from tgcn_model import (
-        TGCN,
-        build_toy_graph,
-    )
+def real_data_training_test():
 
     print("=" * 70)
-    print("TRAIN LOOP SMOKE TEST")
+    print("REAL DATA T-GCN TRAINING")
     print("=" * 70)
+
+    # ────────────────────────────────────────────────────────
+    # LOAD REAL DATA
+    # ────────────────────────────────────────────────────────
+    X_train = REAL_DATA["X_train_full"]
+    y_train = REAL_DATA["y_train"]
+
+    X_val = REAL_DATA["X_val_full"]
+    y_val = REAL_DATA["y_val"]
+
+    edge_index = REAL_DATA["edge_index"]
+    edge_weight = REAL_DATA["edge_weight"]
+
+    # ────────────────────────────────────────────────────────
+    # SMALL DEBUG SUBSET
+    # REMOVE THESE LINES LATER
+    # ────────────────────────────────────────────────────────
+    X_train = X_train[:2048]
+    y_train = y_train[:2048]
+
+    X_val = X_val[:512]
+    y_val = y_val[:512]
+
+    print("\nDataset shapes:")
+
+    print(f"X_train : {tuple(X_train.shape)}")
+    print(f"y_train : {tuple(y_train.shape)}")
+
+    print(f"X_val   : {tuple(X_val.shape)}")
+    print(f"y_val   : {tuple(y_val.shape)}")
 
     # ────────────────────────────────────────────────────────
     # CONFIG
     # ────────────────────────────────────────────────────────
-    BATCH_TRAIN = 32
-    BATCH_VAL = 8
+    BATCH_SIZE = 32
 
-    T = 24
-    N = 15
-    F_IN = 8
-    HIDDEN = 32
-    OUT = 1
+    T = X_train.shape[1]
+    N = X_train.shape[2]
+    F_IN = X_train.shape[3]
 
-    N_TRAIN = 128
-    N_VAL = 32
+    OUT = y_train.shape[-1]
 
-    torch.manual_seed(42)
+    HIDDEN = 64
 
     # ────────────────────────────────────────────────────────
-    # GRAPH
+    # DATALOADERS
     # ────────────────────────────────────────────────────────
-    edge_index, edge_weight = build_toy_graph(
-        n_nodes=N
+    train_loader = DataLoader(
+        TensorDataset(
+            X_train,
+            y_train,
+        ),
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+    )
+
+    val_loader = DataLoader(
+        TensorDataset(
+            X_val,
+            y_val,
+        ),
+        batch_size=BATCH_SIZE,
+        shuffle=False,
     )
 
     # ────────────────────────────────────────────────────────
@@ -455,8 +458,8 @@ def smoke_test():
         hidden_dim=HIDDEN,
         output_steps=OUT,
         edge_index=edge_index,
-        n_nodes=N,
         edge_weight=edge_weight,
+        n_nodes=N,
         num_layers=2,
         dropout=0.2,
     )
@@ -470,58 +473,8 @@ def smoke_test():
     )
 
     print(
-        f"\nTotal params: "
+        f"\nParameters: "
         f"{total_params:,}"
-    )
-
-    # ────────────────────────────────────────────────────────
-    # SYNTHETIC DATA
-    # ────────────────────────────────────────────────────────
-    X_train = torch.rand(
-        N_TRAIN,
-        T,
-        N,
-        F_IN,
-    )
-
-    y_train = torch.rand(
-        N_TRAIN,
-        N,
-        OUT,
-    )
-
-    X_val = torch.rand(
-        N_VAL,
-        T,
-        N,
-        F_IN,
-    )
-
-    y_val = torch.rand(
-        N_VAL,
-        N,
-        OUT,
-    )
-
-    # ────────────────────────────────────────────────────────
-    # DATALOADERS
-    # ────────────────────────────────────────────────────────
-    train_loader = DataLoader(
-        TensorDataset(
-            X_train,
-            y_train,
-        ),
-        batch_size=BATCH_TRAIN,
-        shuffle=True,
-    )
-
-    val_loader = DataLoader(
-        TensorDataset(
-            X_val,
-            y_val,
-        ),
-        batch_size=BATCH_VAL,
-        shuffle=False,
     )
 
     # ────────────────────────────────────────────────────────
@@ -532,50 +485,16 @@ def smoke_test():
         train_loader=train_loader,
         val_loader=val_loader,
         lr=0.001,
-        max_epochs=10,
-        patience=15,
+        max_epochs=50,
+        patience=10,
         max_norm=5.0,
-        checkpoint_path="best_model_smoke.pt",
-    )
-
-    # ────────────────────────────────────────────────────────
-    # HISTORY CHECKS
-    # ────────────────────────────────────────────────────────
-    assert (
-        len(history["train_loss"]) > 0
-    )
-
-    assert (
-        len(history["train_loss"])
-        ==
-        len(history["val_loss"])
-    )
-
-    assert (
-        len(history["train_loss"])
-        ==
-        len(history["val_mae"])
-    )
-
-    print()
-
-    print(
-        "[PASS ✓] "
-        "History lengths consistent"
-    )
-
-    print(
-        f"[PASS ✓] "
-        f"Completed "
-        f"{len(history['train_loss'])} epochs"
+        checkpoint_path="best_real_tgcn.pt",
     )
 
     print()
 
     print("=" * 70)
-
-    print("SMOKE TEST PASSED")
-
+    print("REAL DATA TRAINING COMPLETE")
     print("=" * 70)
 
     return history
@@ -587,4 +506,4 @@ def smoke_test():
 
 if __name__ == "__main__":
 
-    smoke_test()
+    real_data_training_test()
