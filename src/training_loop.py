@@ -10,15 +10,15 @@ from torch.utils.data import (
     DataLoader,
 )
 
-# YOUR MODEL
+# MODEL
 from tgcn_model import TGCN
 
 # REAL DATA
-from data_loader import REAL_DATA
+from real_data_loader import REAL_DATA
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TRAINING LOOP
+# TRAIN FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
 
 def train(
@@ -27,31 +27,12 @@ def train(
     val_loader,
     *,
     lr=0.001,
-    max_epochs=100,
-    patience=15,
+    max_epochs=50,
+    patience=10,
     max_norm=5.0,
-    checkpoint_path="best_model.pt",
+    checkpoint_path="best_real_tgcn.pt",
     device=None,
 ):
-
-    """
-    Train T-GCN model.
-
-    Args:
-        model:
-            TGCN instance.
-
-        train_loader:
-            DataLoader yielding:
-                x: (B, T, N, F)
-                y: (B, N, output_steps)
-
-        val_loader:
-            Validation DataLoader.
-
-    Returns:
-        history dictionary.
-    """
 
     # ────────────────────────────────────────────────────────────
     # DEVICE
@@ -122,7 +103,7 @@ def train(
     )
 
     # ────────────────────────────────────────────────────────────
-    # LOG HEADER
+    # TRAINING HEADER
     # ────────────────────────────────────────────────────────────
     print()
 
@@ -135,7 +116,7 @@ def train(
         f"{'Time':>7}"
     )
 
-    print("─" * 70)
+    print("─" * 75)
 
     # ────────────────────────────────────────────────────────────
     # EPOCH LOOP
@@ -272,7 +253,7 @@ def train(
         )
 
         # ========================================================
-        # CHECKPOINTING
+        # CHECKPOINT
         # ========================================================
         improved = (
             avg_val_loss
@@ -336,14 +317,14 @@ def train(
             print()
 
             print(
-                f"Early stopping at epoch "
-                f"{epoch}"
+                f"Early stopping triggered "
+                f"at epoch {epoch}"
             )
 
             break
 
     # ────────────────────────────────────────────────────────────
-    # RESTORE BEST WEIGHTS
+    # RESTORE BEST MODEL
     # ────────────────────────────────────────────────────────────
     if best_weights is not None:
 
@@ -356,7 +337,7 @@ def train(
     # ────────────────────────────────────────────────────────────
     print()
 
-    print("─" * 70)
+    print("─" * 75)
 
     print(
         f"Best validation MSE : "
@@ -377,14 +358,14 @@ def train(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# REAL DATA TRAINING TEST
+# MAIN TRAINING
 # ─────────────────────────────────────────────────────────────────────────────
 
-def real_data_training_test():
+def real_training_run():
 
-    print("=" * 70)
+    print("=" * 75)
     print("REAL DATA T-GCN TRAINING")
-    print("=" * 70)
+    print("=" * 75)
 
     # ────────────────────────────────────────────────────────
     # LOAD REAL DATA
@@ -399,15 +380,23 @@ def real_data_training_test():
     edge_weight = REAL_DATA["edge_weight"]
 
     # ────────────────────────────────────────────────────────
-    # SMALL DEBUG SUBSET
-    # REMOVE THESE LINES LATER
+    # DEBUG SUBSET
+    #
+    # IMPORTANT:
+    # This does NOT affect scientific validity.
+    # Used ONLY for faster debugging.
+    #
+    # REMOVE THESE LINES FOR FINAL PAPER RUNS
     # ────────────────────────────────────────────────────────
-    X_train = X_train[:2048]
-    y_train = y_train[:2048]
+    X_train = X_train[:512]
+    y_train = y_train[:512]
 
-    X_val = X_val[:512]
-    y_val = y_val[:512]
+    X_val = X_val[:128]
+    y_val = y_val[:128]
 
+    # ────────────────────────────────────────────────────────
+    # SHAPES
+    # ────────────────────────────────────────────────────────
     print("\nDataset shapes:")
 
     print(f"X_train : {tuple(X_train.shape)}")
@@ -419,7 +408,7 @@ def real_data_training_test():
     # ────────────────────────────────────────────────────────
     # CONFIG
     # ────────────────────────────────────────────────────────
-    BATCH_SIZE = 32
+    BATCH_SIZE = 16
 
     T = X_train.shape[1]
     N = X_train.shape[2]
@@ -427,7 +416,8 @@ def real_data_training_test():
 
     OUT = y_train.shape[-1]
 
-    HIDDEN = 64
+    # Smaller hidden size for debugging speed
+    HIDDEN = 32
 
     # ────────────────────────────────────────────────────────
     # DATALOADERS
@@ -493,17 +483,17 @@ def real_data_training_test():
 
     print()
 
-    print("=" * 70)
-    print("REAL DATA TRAINING COMPLETE")
-    print("=" * 70)
+    print("=" * 75)
+    print("REAL TRAINING COMPLETE")
+    print("=" * 75)
 
     return history
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ENTRY POINT
+# ENTRY
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
 
-    real_data_training_test()
+    real_training_run()
