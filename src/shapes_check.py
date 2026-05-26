@@ -12,7 +12,7 @@ files = [
     "node_static_features.npy",
 ]
 
-BASE = "processed"
+BASE = "data/processed"
 
 for f in files:
 
