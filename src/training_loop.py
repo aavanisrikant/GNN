@@ -14,7 +14,7 @@ from torch.utils.data import (
 from tgcn_model import TGCN
 
 # REAL DATA
-from real_data_loader import REAL_DATA
+from data_loader import REAL_DATA
 
 
 # ─────────────────────────────────────────────────────────────────────────────
