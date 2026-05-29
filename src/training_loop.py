@@ -380,21 +380,6 @@ def real_training_run():
     edge_weight = REAL_DATA["edge_weight"]
 
     # ────────────────────────────────────────────────────────
-    # DEBUG SUBSET
-    #
-    # IMPORTANT:
-    # This does NOT affect scientific validity.
-    # Used ONLY for faster debugging.
-    #
-    # REMOVE THESE LINES FOR FINAL PAPER RUNS
-    # ────────────────────────────────────────────────────────
-    X_train = X_train[:512]
-    y_train = y_train[:512]
-
-    X_val = X_val[:128]
-    y_val = y_val[:128]
-
-    # ────────────────────────────────────────────────────────
     # SHAPES
     # ────────────────────────────────────────────────────────
     print("\nDataset shapes:")
@@ -417,7 +402,7 @@ def real_training_run():
     OUT = y_train.shape[-1]
 
     # Smaller hidden size for debugging speed
-    HIDDEN = 32
+    HIDDEN = 64
 
     # ────────────────────────────────────────────────────────
     # DATALOADERS
