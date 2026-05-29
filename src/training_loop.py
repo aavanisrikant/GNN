@@ -133,7 +133,12 @@ def train(
         train_loss_sum = 0.0
         train_samples = 0
 
-        for x_batch, y_batch in train_loader:
+        for batch_idx, (x_batch, y_batch) in enumerate(train_loader):
+            if batch_idx % 100 == 0:
+                print(
+                    f"Epoch {epoch} | "
+                     f"Batch {batch_idx}/{len(train_loader)}"
+                )
 
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
