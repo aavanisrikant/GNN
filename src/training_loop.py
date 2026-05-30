@@ -380,6 +380,15 @@ def real_training_run():
 
     X_val = REAL_DATA["X_val_full"]
     y_val = REAL_DATA["y_val"]
+    # --------------------------------------------------
+# RESEARCH SUBSET
+# --------------------------------------------------
+
+    X_train = X_train[:5000]
+    y_train = y_train[:5000]
+
+    X_val = X_val[:1000]
+    y_val = y_val[:1000]
 
     edge_index = REAL_DATA["edge_index"]
     edge_weight = REAL_DATA["edge_weight"]
