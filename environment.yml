@@ -5,13 +5,15 @@ channels:
 dependencies:
   - python=3.10
   - pip
-  - pytorch
-  - torchvision
-  - torchaudio
+  - pytorch>=2.1
+  - numpy
+  - pandas>=2.0
+  - matplotlib>=3.7
+  - openpyxl
+  - pytest
   - pip:
-      - torch-geometric
-      - osmnx
+      - torch-geometric>=2.4
+      - osmnx>=1.9
       - geopandas
-      - streamlit
-      - plotly
-      - earthengine-api
+      - streamlit>=1.30
+      - plotly>=5.18

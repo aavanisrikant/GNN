@@ -1,0 +1,11 @@
+torch>=2.1
+torch-geometric>=2.4
+numpy
+pandas>=2.0
+matplotlib>=3.7
+openpyxl
+osmnx>=1.9
+geopandas
+streamlit>=1.30
+plotly>=5.18
+pytest

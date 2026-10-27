@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.venv/
+venv/
+
+# Data (CPCB downloads and generated arrays are large / re-creatable)
+data/raw/
+data/processed/*.npy
+data/processed/*.csv
+!data/processed/station_coords.csv
+data/processed/*.json
+data/morphology_cache/
+osm_cache/
+cache/
+
+# Model outputs
+models/
+*.pt
+results/metrics/*.npy
+results/experiments/**/*.pt
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
